@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Lunar3D — Moon Landing MMO</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { 
+      width: 100%; height: 100%; overflow: hidden; 
+      background: #000; color: #fff; font-family: 'Courier New', monospace;
+    }
+    #game-canvas { width: 100%; height: 100%; display: block; }
+    
+    /* HUD Styles */
+    #hud {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 10;
+    }
+    #hud > * { pointer-events: auto; }
+    
+    .hud-panel {
+      background: rgba(0, 0, 0, 0.7);
+      border: 1px solid rgba(0, 255, 136, 0.3);
+      border-radius: 4px;
+      padding: 8px 12px;
+      color: #0f8;
+      font-size: 12px;
+    }
+    
+    /* Score - top left */
+    #hud-score {
+      position: absolute; top: 10px; left: 10px;
+    }
+    
+    /* Minimap - top right */
+    #hud-minimap {
+      position: absolute; top: 10px; right: 10px;
+      width: 150px; height: 150px;
+    }
+    #minimap-canvas {
+      width: 100%; height: 100%;
+      border: 1px solid rgba(0, 255, 136, 0.3);
+      border-radius: 4px;
+    }
+    
+    /* Throttle bar - left side */
+    #hud-throttle {
+      position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+      width: 30px; height: 200px;
+    }
+    .throttle-track {
+      width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      border: 1px solid rgba(0, 255, 136, 0.3);
+      border-radius: 4px;
+      position: relative;
+    }
+    .throttle-fill {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(to top, #0f8, #ff0, #f00);
+      border-radius: 2px;
+      transition: height 0.05s;
+    }
+    .throttle-label {
+      text-align: center; margin-top: 4px; color: #0f8; font-size: 11px;
+    }
+    
+    /* Telemetry - bottom left */
+    #hud-telemetry {
+      position: absolute; bottom: 100px; left: 10px;
+    }
+    
+    /* Fuel gauge - right side */
+    #hud-fuel {
+      position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+      width: 30px; height: 200px;
+    }
+    
+    /* HP bar - bottom right */
+    #hud-hp {
+      position: absolute; bottom: 100px; right: 10px;
+      width: 120px;
+    }
+    .hp-fill {
+      height: 8px;
+      background: linear-gradient(to right, #f00, #0f0);
+      border-radius: 2px;
+      transition: width 0.1s;
+    }
+    
+    /* Nav Ball - bottom center */
+    #hud-navball {
+      position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+      width: 120px; height: 120px;
+    }
+    #navball-canvas {
+      width: 100%; height: 100%;
+      border-radius: 50%;
+      border: 2px solid rgba(0, 255, 136, 0.3);
+    }
+    
+    /* SAS / RCS indicators */
+    #hud-modes {
+      position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 8px;
+    }
+    .mode-indicator {
+      padding: 2px 8px;
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid #555;
+      border-radius: 3px;
+      font-size: 10px;
+      color: #888;
+    }
+    .mode-indicator.active {
+      border-color: #0f8;
+      color: #0f8;
+    }
+    
+    /* Target / Landing pad indicator */
+    #hud-target {
+      position: absolute; bottom: 135px; left: 50%; transform: translateX(-50%);
+    }
+    
+    /* Loading screen */
+    #loading {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: #000; z-index: 100;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    #loading h1 {
+      font-size: 48px; color: #0f8; margin-bottom: 20px;
+      text-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+    }
+    #loading .subtitle {
+      color: #888; font-size: 14px; margin-bottom: 30px;
+    }
+    #loading .status {
+      color: #0f8; font-size: 12px;
+    }
+    
+    /* Death screen */
+    #death-screen {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.8); z-index: 50;
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+    }
+    #death-screen.visible { display: flex; }
+    #death-screen h2 { color: #f44; font-size: 36px; margin-bottom: 10px; }
+    #death-screen .info { color: #888; font-size: 14px; margin-bottom: 20px; }
+    #death-screen button {
+      background: rgba(0, 255, 136, 0.2); border: 1px solid #0f8;
+      color: #0f8; padding: 10px 30px; font-family: 'Courier New', monospace;
+      font-size: 16px; cursor: pointer; border-radius: 4px;
+    }
+    #death-screen button:hover { background: rgba(0, 255, 136, 0.4); }
+    
+    /* Perf monitor */
+    #perf-monitor {
+      position: absolute; top: 50px; left: 10px;
+      display: none; font-size: 10px; color: #0f8;
+      background: rgba(0,0,0,0.7); padding: 5px; border-radius: 3px;
+    }
+    #perf-monitor.visible { display: block; }
+  </style>
+</head>
+<body>
+  <!-- Loading Screen -->
+  <div id="loading">
+    <h1>🌙 LUNAR 3D</h1>
+    <div class="subtitle">Multiplayer Moon Landing MMO</div>
+    <div class="status" id="loading-status">Initializing physics engine...</div>
+  </div>
+
+  <!-- Game Canvas -->
+  <canvas id="game-canvas"></canvas>
+
+  <!-- HUD Overlay -->
+  <div id="hud" style="display:none;">
+    <!-- Score & Rank -->
+    <div id="hud-score" class="hud-panel">
+      <div>Score: <span id="score">0</span></div>
+      <div>Rank: <span id="rank">#--</span></div>
+    </div>
+    
+    <!-- Minimap -->
+    <div id="hud-minimap" class="hud-panel" style="padding:4px;">
+      <canvas id="minimap-canvas" width="150" height="150"></canvas>
+    </div>
+    
+    <!-- Throttle Bar -->
+    <div id="hud-throttle">
+      <div class="throttle-track">
+        <div class="throttle-fill" id="throttle-fill" style="height:0%"></div>
+      </div>
+      <div class="throttle-label" id="throttle-label">0%</div>
+    </div>
+    
+    <!-- Telemetry -->
+    <div id="hud-telemetry" class="hud-panel">
+      <div>ALT: <span id="altitude">0</span>m</div>
+      <div>VEL: <span id="velocity">0</span> m/s</div>
+      <div style="font-size:10px;color:#888">
+        ↕ <span id="vel-vertical">0</span> 
+        ↔ <span id="vel-horizontal">0</span>
+      </div>
+    </div>
+    
+    <!-- Fuel Gauge -->
+    <div id="hud-fuel">
+      <div class="throttle-track">
+        <div class="throttle-fill" id="fuel-fill" style="height:100%;background:linear-gradient(to top, #f80, #0f8)"></div>
+      </div>
+      <div class="throttle-label" id="fuel-label">100%</div>
+    </div>
+    
+    <!-- HP Bar -->
+    <div id="hud-hp" class="hud-panel">
+      <div style="margin-bottom:4px;font-size:10px;">HP</div>
+      <div style="background:#333;height:8px;border-radius:2px;">
+        <div class="hp-fill" id="hp-fill" style="width:100%"></div>
+      </div>
+      <div style="text-align:right;font-size:10px;"><span id="hp-text">100/100</span></div>
+    </div>
+    
+    <!-- Nav Ball -->
+    <div id="hud-navball">
+      <canvas id="navball-canvas" width="120" height="120"></canvas>
+    </div>
+    
+    <!-- SAS / RCS Mode -->
+    <div id="hud-modes">
+      <div class="mode-indicator" id="sas-indicator">SAS: OFF</div>
+      <div class="mode-indicator" id="rcs-indicator">RCS</div>
+    </div>
+    
+    <!-- Target -->
+    <div id="hud-target" class="hud-panel" style="font-size:11px;">
+      🎯 <span id="target-info">Pad: --</span>
+    </div>
+    
+    <!-- Perf Monitor -->
+    <div id="perf-monitor">
+      FPS: <span id="perf-fps">0</span> | 
+      Entities: <span id="perf-entities">0</span> |
+      Draw: <span id="perf-draw">0</span>
+    </div>
+  </div>
+
+  <!-- Death Screen -->
+  <div id="death-screen">
+    <h2>💥 DESTROYED</h2>
+    <div class="info" id="death-info">Crashed into terrain</div>
+    <button id="respawn-btn">RESPAWN</button>
+  </div>
+
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>
