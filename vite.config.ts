@@ -10,6 +10,9 @@ export default defineConfig({
   build: {
     outDir: '../../dist',
     emptyOutDir: true,
+    rollupOptions: {
+      external: ['/lunar_physics_wasm.js'],
+    },
   },
   resolve: {
     alias: {
