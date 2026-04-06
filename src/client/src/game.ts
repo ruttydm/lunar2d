@@ -7,17 +7,20 @@ import { Renderer } from './renderer';
 import { InputManager } from './controls';
 import { CameraSystem, CameraMode } from './camera';
 import { loadPhysics, WasmSimulation, EntityType, SasMode, EventType } from './wasm-bridge';
+import { NetworkClient } from './network';
 
 export class Game {
   private renderer!: Renderer;
   private input!: InputManager;
   private camera!: CameraSystem;
   private sim!: InstanceType<WasmSimulation>;
+  private network!: NetworkClient;
   
   private playerId: number = 0;
   private running = false;
   private lastTime = 0;
   private frameCount = 0;
+  private multiplayer = false;
   
   // HUD elements
   private hudElements: Record<string, HTMLElement> = {};
@@ -53,7 +56,11 @@ export class Game {
     // Setup world
     this.setupWorld();
     
-    // Spawn player
+    // Setup network (connect to server, fall back to offline mode)
+    statusEl.textContent = 'Connecting to server...';
+    this.setupNetwork();
+    
+    // Spawn player (offline by default; online spawn happens on 'welcome')
     this.spawnPlayer();
     
     statusEl.textContent = 'Ready!';
@@ -70,6 +77,61 @@ export class Game {
     for (const id of ids) {
       this.hudElements[id] = document.getElementById(id)!;
     }
+  }
+
+  private setupNetwork() {
+    this.network = new NetworkClient();
+    
+    this.network.onWelcome = (data) => {
+      console.log(`[game] Connected as player ${data.playerId}`);
+      this.multiplayer = true;
+      
+      // Request spawn on server
+      this.network.sendSpawn({
+        landerType: EntityType.LANDER_STANDARD,
+        altitude: 2000,
+      });
+    };
+
+    this.network.onState = (state) => {
+      // Update other players' visuals from server state
+      for (const entity of state.entities) {
+        if (entity.type >= 0 && entity.type <= 3) {
+          // It's a lander
+          this.renderer.updateLander(
+            -1, // We don't have entity IDs from server yet — needs fix
+            [entity.x, entity.y, entity.z],
+            [entity.qx, entity.qy, entity.qz, entity.qw],
+            entity.throttle,
+            entity.type,
+          );
+        }
+      }
+    };
+
+    this.network.onDeath = (cause) => {
+      this.showDeathScreen(cause);
+    };
+
+    this.network.onLanded = (data) => {
+      console.log(`[game] Landed! Score: +${data.score} (total: ${data.totalScore})`);
+      // TODO: Show landing success overlay
+    };
+
+    this.network.onLeaderboard = (entries) => {
+      // Update HUD leaderboard
+      if (entries.length > 0) {
+        const top3 = entries.slice(0, 3).map((e, i) => `${i + 1}. ${e.name}: ${e.score}`).join(' | ');
+        console.log(`[game] Leaderboard: ${top3}`);
+      }
+    };
+
+    this.network.onDisconnect = () => {
+      this.multiplayer = false;
+      console.log('[game] Disconnected — running in offline mode');
+    };
+
+    this.network.connect();
   }
 
   private setupWorld() {
@@ -135,7 +197,7 @@ export class Game {
     // Update input
     this.input.update();
 
-    // Send input to WASM
+    // Send input to WASM (local prediction)
     if (this.sim.is_active(this.playerId)) {
       const s = this.input.state;
       this.sim.apply_input(
@@ -153,6 +215,24 @@ export class Game {
         s.rcsMode,
         s.fineControl,
       );
+
+      // Send input to server too (for authoritative sim)
+      if (this.multiplayer && this.network.connected) {
+        this.network.sendInput({
+          throttle: s.throttle,
+          pitch: s.pitch,
+          yaw: s.yaw,
+          roll: s.roll,
+          translateX: s.translateX,
+          translateY: s.translateY,
+          translateZ: s.translateZ,
+          sasMode: s.sasMode,
+          fire: s.fire,
+          boost: s.boost,
+          rcsMode: s.rcsMode,
+          fineControl: s.fineControl,
+        });
+      }
     }
 
     // Run physics tick(s)
@@ -357,6 +437,9 @@ export class Game {
     document.getElementById('respawn-btn')!.onclick = () => {
       deathScreen.classList.remove('visible');
       this.spawnPlayer();
+      if (this.multiplayer && this.network.connected) {
+        this.network.sendSpawn({ landerType: EntityType.LANDER_STANDARD, altitude: 2000 });
+      }
     };
   }
 
