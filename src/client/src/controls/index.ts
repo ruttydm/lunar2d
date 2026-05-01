@@ -27,12 +27,17 @@ export interface InputState {
   // Actions
   fire: boolean;
   boost: boolean;
+  brakeAssist: boolean;
   
   // Camera
   cameraOrbitX: number;
   cameraOrbitY: number;
+  cameraPanX: number;
+  cameraPanY: number;
   cameraZoom: number;
+  cameraCycle: boolean;
   mapView: boolean;
+  targetCycle: boolean;
 }
 
 export class InputManager {
@@ -54,10 +59,15 @@ export class InputManager {
     fineControl: false,
     fire: false,
     boost: false,
+    brakeAssist: false,
     cameraOrbitX: 0,
     cameraOrbitY: 0,
+    cameraPanX: 0,
+    cameraPanY: 0,
     cameraZoom: 0,
+    cameraCycle: false,
     mapView: false,
+    targetCycle: false,
   };
 
   // Mouse state
@@ -67,6 +77,14 @@ export class InputManager {
   private mouseDY = 0;
   private mouseDown = false;
   private rightMouseDown = false;
+  private middleMouseDown = false;
+  private touchPitch = 0;
+  private touchYaw = 0;
+  private touchCameraX = 0;
+  private touchCameraY = 0;
+  private touchFire = false;
+  private touchBoost = false;
+  private touchBrake = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -79,6 +97,10 @@ export class InputManager {
   private setupKeyboard() {
     window.addEventListener('keydown', (e) => {
       this.keys.add(e.code);
+      if (e.repeat) {
+        e.preventDefault();
+        return;
+      }
       
       // Toggle keys
       switch (e.code) {
@@ -101,10 +123,12 @@ export class InputManager {
           this.state.throttle = 0.0;
           break;
         case 'KeyV': // Camera mode
-          // Handled in camera system
+          this.state.cameraCycle = true;
           break;
         case 'KeyB': // Brake assist
-          // TODO: compute brake assist
+          break;
+        case 'Tab':
+          this.state.targetCycle = true;
           break;
       }
       
@@ -120,17 +144,24 @@ export class InputManager {
   private setupMouse() {
     this.canvas.addEventListener('mousedown', (e) => {
       if (e.button === 0) this.mouseDown = true;
+      if (e.button === 1) this.middleMouseDown = true;
       if (e.button === 2) this.rightMouseDown = true;
     });
 
     this.canvas.addEventListener('mouseup', (e) => {
       if (e.button === 0) this.mouseDown = false;
+      if (e.button === 1) this.middleMouseDown = false;
       if (e.button === 2) this.rightMouseDown = false;
     });
 
     this.canvas.addEventListener('mousemove', (e) => {
-      this.mouseDX += e.movementX;
-      this.mouseDY += e.movementY;
+      if (this.rightMouseDown) {
+        this.mouseDX += e.movementX;
+        this.mouseDY += e.movementY;
+      } else if (this.middleMouseDown) {
+        this.state.cameraPanX += e.movementX;
+        this.state.cameraPanY += e.movementY;
+      }
     });
 
     this.canvas.addEventListener('wheel', (e) => {
@@ -142,11 +173,87 @@ export class InputManager {
   }
 
   private setupTouch() {
-    // TODO: Virtual joysticks for mobile
+    this.bindTouchStick('touch-stick-flight', (x, y) => {
+      this.touchYaw = x;
+      this.touchPitch = y;
+    });
+    this.bindTouchStick('touch-stick-camera', (x, y) => {
+      this.touchCameraX = x * 7;
+      this.touchCameraY = y * 7;
+    });
+
+    const throttle = document.getElementById('touch-throttle');
+    const setThrottle = (clientY: number) => {
+      if (!throttle) return;
+      const rect = throttle.getBoundingClientRect();
+      this.state.throttle = 1 - Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    };
+    throttle?.addEventListener('pointerdown', (event) => {
+      throttle.setPointerCapture(event.pointerId);
+      setThrottle(event.clientY);
+    });
+    throttle?.addEventListener('pointermove', (event) => {
+      if ((event.buttons & 1) === 1) setThrottle(event.clientY);
+    });
+
+    this.bindHoldButton('touch-fire', (pressed) => this.touchFire = pressed);
+    this.bindHoldButton('touch-boost', (pressed) => this.touchBoost = pressed);
+    this.bindHoldButton('touch-brake', (pressed) => this.touchBrake = pressed);
+    document.getElementById('touch-sas')?.addEventListener('click', () => {
+      this.state.sasMode = (this.state.sasMode + 1) % 7;
+    });
+    document.getElementById('touch-rcs')?.addEventListener('click', () => {
+      this.state.rcsMode = !this.state.rcsMode;
+    });
   }
 
   private setupGamepad() {
-    // TODO: Gamepad support via navigator.getGamepads()
+    // Gamepads are polled in update().
+  }
+
+  private bindTouchStick(id: string, update: (x: number, y: number) => void) {
+    const el = document.getElementById(id);
+    const knob = el?.querySelector<HTMLElement>('.touch-stick-knob');
+    if (!el || !knob) return;
+
+    const reset = () => {
+      knob.style.transform = 'translate(-50%, -50%)';
+      update(0, 0);
+    };
+    const move = (clientX: number, clientY: number) => {
+      const rect = el.getBoundingClientRect();
+      const radius = rect.width * 0.42;
+      let x = clientX - (rect.left + rect.width / 2);
+      let y = clientY - (rect.top + rect.height / 2);
+      const len = Math.hypot(x, y);
+      if (len > radius) {
+        x = x / len * radius;
+        y = y / len * radius;
+      }
+      knob.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+      update(x / radius, y / radius);
+    };
+
+    el.addEventListener('pointerdown', (event) => {
+      el.setPointerCapture(event.pointerId);
+      move(event.clientX, event.clientY);
+    });
+    el.addEventListener('pointermove', (event) => {
+      if ((event.buttons & 1) === 1) move(event.clientX, event.clientY);
+    });
+    el.addEventListener('pointerup', reset);
+    el.addEventListener('pointercancel', reset);
+  }
+
+  private bindHoldButton(id: string, update: (pressed: boolean) => void) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('pointerdown', (event) => {
+      el.setPointerCapture(event.pointerId);
+      update(true);
+    });
+    el.addEventListener('pointerup', () => update(false));
+    el.addEventListener('pointercancel', () => update(false));
   }
 
   /**
@@ -154,6 +261,9 @@ export class InputManager {
    */
   update() {
     const k = this.keys;
+    this.state.fire = false;
+    this.state.boost = false;
+    this.state.brakeAssist = false;
     
     // Throttle (Shift = up, Ctrl = down, persists)
     if (k.has('ShiftLeft') || k.has('ShiftRight')) {
@@ -198,15 +308,66 @@ export class InputManager {
       this.state.translateZ = 0;
     }
 
+    if (Math.abs(this.touchPitch) > 0.01 || Math.abs(this.touchYaw) > 0.01) {
+      if (this.state.rcsMode) {
+        this.state.translateX = this.touchYaw;
+        this.state.translateZ = this.touchPitch;
+      } else {
+        this.state.pitch = this.touchPitch;
+        this.state.yaw = this.touchYaw;
+      }
+    }
+
+    this.applyGamepadState();
+
     // Actions
-    this.state.fire = this.mouseDown;
-    this.state.boost = k.has('Space');
+    this.state.fire = this.mouseDown || this.state.fire;
+    this.state.boost = k.has('Space') || this.state.boost;
+    this.state.brakeAssist = k.has('KeyB') || this.state.brakeAssist;
+    this.state.fire = this.state.fire || this.touchFire;
+    this.state.boost = this.state.boost || this.touchBoost;
+    this.state.brakeAssist = this.state.brakeAssist || this.touchBrake;
 
     // Camera orbit from mouse drag
     this.state.cameraOrbitX = this.mouseDX;
     this.state.cameraOrbitY = this.mouseDY;
+    this.state.cameraOrbitX += this.touchCameraX;
+    this.state.cameraOrbitY += this.touchCameraY;
+    this.touchCameraX *= 0.84;
+    this.touchCameraY *= 0.84;
     this.mouseDX = 0;
     this.mouseDY = 0;
+  }
+
+  private applyGamepadState() {
+    const gamepads = navigator.getGamepads?.() ?? [];
+    const pad = Array.from(gamepads).find((candidate) => candidate && candidate.connected);
+    if (!pad) return;
+
+    const deadzone = (value: number) => Math.abs(value) < 0.12 ? 0 : value;
+    const leftX = deadzone(pad.axes[0] ?? 0);
+    const leftY = deadzone(pad.axes[1] ?? 0);
+    const rightX = deadzone(pad.axes[2] ?? 0);
+    const rightY = deadzone(pad.axes[3] ?? 0);
+
+    if (!this.state.rcsMode) {
+      this.state.yaw = leftX;
+      this.state.pitch = leftY;
+    } else {
+      this.state.translateX = leftX;
+      this.state.translateZ = leftY;
+    }
+
+    this.state.cameraOrbitX += rightX * 8;
+    this.state.cameraOrbitY += rightY * 8;
+
+    const leftTrigger = pad.buttons[6]?.value ?? 0;
+    const rightTrigger = pad.buttons[7]?.value ?? 0;
+    this.state.throttle = Math.max(0, Math.min(1, this.state.throttle + rightTrigger * 0.025 - leftTrigger * 0.025));
+    this.state.roll = (pad.buttons[5]?.pressed ? 1 : 0) - (pad.buttons[4]?.pressed ? 1 : 0);
+    this.state.boost = pad.buttons[0]?.pressed ?? false;
+    this.state.fire = this.state.fire || (pad.buttons[2]?.pressed ?? false);
+    this.state.brakeAssist = this.state.brakeAssist || (pad.buttons[3]?.pressed ?? false);
   }
 
   /**

@@ -62,6 +62,12 @@ export class NetworkClient {
     this.url = url || `ws://${host}:${port}`;
   }
 
+  get statusLabel(): string {
+    if (this.connected) return 'ONLINE';
+    if (this.reconnectAttempts > 0 && this.reconnectAttempts < this.maxReconnectAttempts) return 'RECONNECT';
+    return 'OFFLINE';
+  }
+
   connect() {
     try {
       this.ws = new WebSocket(this.url);

@@ -8,7 +8,8 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { 
       width: 100%; height: 100%; overflow: hidden; 
-      background: #000; color: #fff; font-family: 'Courier New', monospace;
+      background: #000; color: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      letter-spacing: 0;
     }
     #game-canvas { width: 100%; height: 100%; display: block; }
     
@@ -20,12 +21,15 @@
     #hud > * { pointer-events: auto; }
     
     .hud-panel {
-      background: rgba(0, 0, 0, 0.7);
-      border: 1px solid rgba(0, 255, 136, 0.3);
-      border-radius: 4px;
-      padding: 8px 12px;
-      color: #0f8;
+      background: linear-gradient(180deg, rgba(4, 12, 18, 0.86), rgba(1, 4, 8, 0.78));
+      border: 1px solid rgba(132, 255, 211, 0.32);
+      border-radius: 6px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255,255,255,0.06);
+      padding: 9px 12px;
+      color: #84ffd3;
       font-size: 12px;
+      line-height: 1.55;
+      backdrop-filter: blur(8px);
     }
     
     /* Score - top left */
@@ -40,8 +44,8 @@
     }
     #minimap-canvas {
       width: 100%; height: 100%;
-      border: 1px solid rgba(0, 255, 136, 0.3);
-      border-radius: 4px;
+      border: 1px solid rgba(132, 255, 211, 0.32);
+      border-radius: 6px;
     }
     
     /* Throttle bar - left side */
@@ -51,19 +55,19 @@
     }
     .throttle-track {
       width: 100%; height: 100%;
-      background: rgba(0, 0, 0, 0.7);
-      border: 1px solid rgba(0, 255, 136, 0.3);
-      border-radius: 4px;
+      background: rgba(2, 8, 12, 0.76);
+      border: 1px solid rgba(132, 255, 211, 0.32);
+      border-radius: 6px;
       position: relative;
     }
     .throttle-fill {
       position: absolute; bottom: 0; left: 0; right: 0;
-      background: linear-gradient(to top, #0f8, #ff0, #f00);
-      border-radius: 2px;
+      background: linear-gradient(to top, #4affbe, #ffcf5a, #ff5f58);
+      border-radius: 4px;
       transition: height 0.05s;
     }
     .throttle-label {
-      text-align: center; margin-top: 4px; color: #0f8; font-size: 11px;
+      text-align: center; margin-top: 5px; color: #84ffd3; font-size: 11px;
     }
     
     /* Telemetry - bottom left */
@@ -84,20 +88,21 @@
     }
     .hp-fill {
       height: 8px;
-      background: linear-gradient(to right, #f00, #0f0);
-      border-radius: 2px;
+      background: linear-gradient(to right, #ff5f58, #ffcf5a, #84ffd3);
+      border-radius: 3px;
       transition: width 0.1s;
     }
     
     /* Nav Ball - bottom center */
     #hud-navball {
       position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
-      width: 120px; height: 120px;
+      width: 172px; height: 172px;
     }
     #navball-canvas {
       width: 100%; height: 100%;
       border-radius: 50%;
-      border: 2px solid rgba(0, 255, 136, 0.3);
+      border: 2px solid rgba(132, 255, 211, 0.35);
+      box-shadow: 0 0 26px rgba(132,255,211,0.08);
     }
     
     /* SAS / RCS indicators */
@@ -107,54 +112,82 @@
     }
     .mode-indicator {
       padding: 2px 8px;
-      background: rgba(0, 0, 0, 0.5);
+      background: rgba(2, 8, 12, 0.82);
       border: 1px solid #555;
-      border-radius: 3px;
+      border-radius: 5px;
       font-size: 10px;
       color: #888;
     }
     .mode-indicator.active {
-      border-color: #0f8;
-      color: #0f8;
+      border-color: #84ffd3;
+      color: #84ffd3;
+      box-shadow: 0 0 16px rgba(132, 255, 211, 0.12);
     }
     
     /* Target / Landing pad indicator */
     #hud-target {
       position: absolute; bottom: 135px; left: 50%; transform: translateX(-50%);
     }
+
+    #hud-objective {
+      position: absolute; top: 58px; left: 50%; transform: translateX(-50%);
+      width: min(360px, calc(100vw - 260px));
+      text-align: center;
+      pointer-events: none;
+    }
+    #objective-title {
+      color: #f4fbff;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    #objective-detail {
+      color: #c6d2da;
+      font-size: 10px;
+      margin-top: 2px;
+      white-space: normal;
+    }
     
     /* Loading screen */
     #loading {
       position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: #000; z-index: 100;
+      background:
+        radial-gradient(circle at 50% 35%, rgba(132,255,211,0.14), transparent 22rem),
+        radial-gradient(circle at 50% 120%, rgba(255,207,90,0.10), transparent 30rem),
+        #020406;
+      z-index: 100;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
     }
     #loading h1 {
-      font-size: 48px; color: #0f8; margin-bottom: 20px;
-      text-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+      font-size: clamp(38px, 7vw, 72px); color: #f4fbff; margin-bottom: 16px;
+      text-shadow: 0 0 30px rgba(132, 255, 211, 0.28);
+      letter-spacing: 0;
     }
     #loading .subtitle {
       color: #888; font-size: 14px; margin-bottom: 30px;
     }
     #loading .status {
-      color: #0f8; font-size: 12px;
+      color: #84ffd3; font-size: 12px;
     }
     
     /* Death screen */
-    #death-screen {
+    #death-screen, #landing-screen {
       position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0, 0, 0, 0.8); z-index: 50;
+      background: rgba(0, 0, 0, 0.78); z-index: 50;
       display: none; flex-direction: column; align-items: center; justify-content: center;
+      backdrop-filter: blur(8px);
     }
-    #death-screen.visible { display: flex; }
-    #death-screen h2 { color: #f44; font-size: 36px; margin-bottom: 10px; }
-    #death-screen .info { color: #888; font-size: 14px; margin-bottom: 20px; }
-    #death-screen button {
-      background: rgba(0, 255, 136, 0.2); border: 1px solid #0f8;
-      color: #0f8; padding: 10px 30px; font-family: 'Courier New', monospace;
-      font-size: 16px; cursor: pointer; border-radius: 4px;
+    #death-screen.visible, #landing-screen.visible { display: flex; }
+    #death-screen h2, #landing-screen h2 { font-size: clamp(32px, 5vw, 54px); margin-bottom: 10px; }
+    #death-screen h2 { color: #ff716a; }
+    #landing-screen h2 { color: #84ffd3; }
+    #death-screen .info, #landing-screen .info { color: #c6d2da; font-size: 14px; margin-bottom: 20px; }
+    #death-screen button, #landing-screen button {
+      background: rgba(132, 255, 211, 0.16); border: 1px solid #84ffd3;
+      color: #dffdf4; padding: 10px 30px; font-family: inherit;
+      font-size: 16px; cursor: pointer; border-radius: 6px;
     }
-    #death-screen button:hover { background: rgba(0, 255, 136, 0.4); }
+    #death-screen button:hover, #landing-screen button:hover { background: rgba(132, 255, 211, 0.28); }
+    #landing-score { font-size: 42px; color: #ffcf5a; margin: 4px 0 12px; }
     
     /* Perf monitor */
     #perf-monitor {
@@ -163,12 +196,149 @@
       background: rgba(0,0,0,0.7); padding: 5px; border-radius: 3px;
     }
     #perf-monitor.visible { display: block; }
+
+    #top-actions {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 8px;
+    }
+    .hud-button {
+      min-width: 88px;
+      background: rgba(2, 8, 12, 0.82);
+      border: 1px solid rgba(132, 255, 211, 0.34);
+      color: #dffdf4;
+      border-radius: 6px;
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+      pointer-events: auto;
+    }
+    .hud-button:hover { background: rgba(132,255,211,0.18); }
+
+    #controls-panel {
+      position: absolute; top: 54px; left: 50%; transform: translateX(-50%);
+      width: min(760px, calc(100vw - 24px));
+      display: none;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      pointer-events: auto;
+    }
+    #controls-panel.visible { display: grid; }
+    #controls-panel h3 {
+      color: #f4fbff;
+      font-size: 12px;
+      margin-bottom: 4px;
+      font-weight: 700;
+    }
+    .control-list { display: grid; gap: 3px; color: #c6d2da; }
+    .control-list div { display: flex; justify-content: space-between; gap: 12px; }
+    .control-list kbd {
+      color: #84ffd3;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 4px;
+      padding: 0 5px;
+      white-space: nowrap;
+    }
+
+    #touch-controls { display: none; }
+    .touch-stick {
+      position: absolute;
+      width: 118px;
+      height: 118px;
+      border: 1px solid rgba(132,255,211,0.32);
+      border-radius: 50%;
+      background: rgba(2, 8, 12, 0.34);
+      pointer-events: auto;
+      touch-action: none;
+    }
+    .touch-stick::after {
+      content: attr(data-label);
+      position: absolute;
+      left: 50%;
+      bottom: -18px;
+      transform: translateX(-50%);
+      color: #84ffd3;
+      font-size: 10px;
+    }
+    .touch-stick-knob {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(132,255,211,0.72);
+      box-shadow: 0 0 20px rgba(132,255,211,0.22);
+    }
+    #touch-stick-flight { left: 18px; bottom: 28px; }
+    #touch-stick-camera { right: 18px; bottom: 28px; }
+    #touch-throttle {
+      position: absolute;
+      left: 18px;
+      bottom: 170px;
+      width: 34px;
+      height: 160px;
+      border: 1px solid rgba(132,255,211,0.32);
+      border-radius: 999px;
+      background: linear-gradient(to top, #4affbe 0 28%, #ffcf5a 28% 70%, #ff5f58 70%);
+      pointer-events: auto;
+      touch-action: none;
+      opacity: 0.84;
+    }
+    .touch-actions {
+      position: absolute;
+      right: 18px;
+      bottom: 166px;
+      display: grid;
+      grid-template-columns: repeat(2, 54px);
+      gap: 8px;
+      pointer-events: auto;
+    }
+    .touch-actions button {
+      height: 42px;
+      border: 1px solid rgba(132,255,211,0.38);
+      border-radius: 8px;
+      background: rgba(2,8,12,0.72);
+      color: #dffdf4;
+      font: inherit;
+      font-size: 10px;
+      touch-action: none;
+    }
+
+    @media (max-width: 720px) {
+      .hud-panel { font-size: 11px; padding: 7px 9px; }
+      #hud-minimap { width: 118px; height: 118px; }
+      #hud-throttle, #hud-fuel { height: 160px; }
+      #hud-telemetry { bottom: 86px; }
+      #hud-hp { bottom: 86px; width: 108px; }
+      #hud-navball { width: 136px; height: 136px; }
+      #hud-target { bottom: 154px; }
+      #hud-objective { display: none; }
+      #controls-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); top: 104px; }
+      #top-actions {
+        top: 66px;
+        left: 10px;
+        transform: none;
+      }
+      .hud-button {
+        min-width: 84px;
+        padding-inline: 8px;
+      }
+    }
+
+    @media (pointer: coarse) {
+      #touch-controls { display: block; }
+      #hud-throttle, #hud-fuel { display: none; }
+      #hud-minimap { opacity: 0.78; }
+    }
   </style>
 </head>
 <body>
   <!-- Loading Screen -->
   <div id="loading">
-    <h1>🌙 LUNAR 3D</h1>
+    <h1>LUNAR 3D</h1>
     <div class="subtitle">Multiplayer Moon Landing MMO</div>
     <div class="status" id="loading-status">Initializing physics engine...</div>
   </div>
@@ -181,7 +351,73 @@
     <!-- Score & Rank -->
     <div id="hud-score" class="hud-panel">
       <div>Score: <span id="score">0</span></div>
-      <div>Rank: <span id="rank">#--</span></div>
+      <div>Link: <span id="rank">OFFLINE</span></div>
+    </div>
+
+    <div id="top-actions">
+      <button class="hud-button" id="controls-toggle">CONTROLS</button>
+      <button class="hud-button" id="audio-toggle">AUDIO OFF</button>
+    </div>
+
+    <div id="controls-panel" class="hud-panel">
+      <div>
+        <h3>Flight</h3>
+        <div class="control-list">
+          <div><span>Throttle up</span><kbd>Shift</kbd></div>
+          <div><span>Throttle down</span><kbd>Ctrl</kbd></div>
+          <div><span>Full / cut</span><kbd>Z / X</kbd></div>
+          <div><span>Boost</span><kbd>Space</kbd></div>
+        </div>
+      </div>
+      <div>
+        <h3>Attitude</h3>
+        <div class="control-list">
+          <div><span>Pitch</span><kbd>W / S</kbd></div>
+          <div><span>Yaw</span><kbd>A / D</kbd></div>
+          <div><span>Roll</span><kbd>Q / E</kbd></div>
+          <div><span>SAS cycle</span><kbd>T</kbd></div>
+        </div>
+      </div>
+      <div>
+        <h3>Systems</h3>
+        <div class="control-list">
+          <div><span>RCS mode</span><kbd>R</kbd></div>
+          <div><span>Fine control</span><kbd>F</kbd></div>
+          <div><span>Brake assist</span><kbd>B</kbd></div>
+          <div><span>Fire</span><kbd>Click</kbd></div>
+        </div>
+      </div>
+      <div>
+        <h3>Camera</h3>
+        <div class="control-list">
+          <div><span>Orbit</span><kbd>Right drag</kbd></div>
+          <div><span>Pan focus</span><kbd>Middle drag</kbd></div>
+          <div><span>Zoom</span><kbd>Wheel</kbd></div>
+          <div><span>Mode / target</span><kbd>V / Tab</kbd></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="touch-controls">
+      <div id="touch-throttle" aria-label="Throttle"></div>
+      <div id="touch-stick-flight" class="touch-stick" data-label="PITCH / YAW">
+        <div class="touch-stick-knob"></div>
+      </div>
+      <div id="touch-stick-camera" class="touch-stick" data-label="CAMERA">
+        <div class="touch-stick-knob"></div>
+      </div>
+      <div class="touch-actions">
+        <button id="touch-fire">FIRE</button>
+        <button id="touch-boost">BOOST</button>
+        <button id="touch-brake">BRAKE</button>
+        <button id="touch-sas">SAS</button>
+        <button id="touch-rcs">RCS</button>
+      </div>
+    </div>
+
+    <div id="hud-objective" class="hud-panel">
+      <div id="objective-title">LAND ALPHA</div>
+      <div id="objective-detail">touchdown &lt; 5 m/s | pad 55m | Tab target</div>
     </div>
     
     <!-- Minimap -->
@@ -210,7 +446,7 @@
     <!-- Fuel Gauge -->
     <div id="hud-fuel">
       <div class="throttle-track">
-        <div class="throttle-fill" id="fuel-fill" style="height:100%;background:linear-gradient(to top, #f80, #0f8)"></div>
+        <div class="throttle-fill" id="fuel-fill" style="height:100%;background:linear-gradient(to top, #ff8f3d, #84ffd3)"></div>
       </div>
       <div class="throttle-label" id="fuel-label">100%</div>
     </div>
@@ -226,7 +462,7 @@
     
     <!-- Nav Ball -->
     <div id="hud-navball">
-      <canvas id="navball-canvas" width="120" height="120"></canvas>
+      <canvas id="navball-canvas" width="172" height="172"></canvas>
     </div>
     
     <!-- SAS / RCS Mode -->
@@ -237,7 +473,7 @@
     
     <!-- Target -->
     <div id="hud-target" class="hud-panel" style="font-size:11px;">
-      🎯 <span id="target-info">Pad: --</span>
+      <span id="target-info">Alpha --m</span>
     </div>
     
     <!-- Perf Monitor -->
@@ -250,9 +486,17 @@
 
   <!-- Death Screen -->
   <div id="death-screen">
-    <h2>💥 DESTROYED</h2>
+    <h2>DESTROYED</h2>
     <div class="info" id="death-info">Crashed into terrain</div>
     <button id="respawn-btn">RESPAWN</button>
+  </div>
+
+  <!-- Landing Screen -->
+  <div id="landing-screen">
+    <h2>LANDED</h2>
+    <div id="landing-score">+0</div>
+    <div class="info" id="landing-detail">Alpha | 0.0m | 0.0 m/s</div>
+    <button id="continue-btn">CONTINUE</button>
   </div>
 
   <script type="module" src="main.ts"></script>

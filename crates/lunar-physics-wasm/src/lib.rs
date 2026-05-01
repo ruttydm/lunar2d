@@ -166,6 +166,14 @@ impl WasmSimulation {
         }
     }
 
+    /// Set entity orientation (quaternion [x,y,z,w]).
+    pub fn set_orientation(&mut self, id: u32, x: f32, y: f32, z: f32, w: f32) {
+        if let Some(idx) = self.valid_index(id) {
+            self.inner.entities.orientations[idx] = [x, y, z, w];
+            self.inner.entities.angular_velocities[idx] = [0.0, 0.0, 0.0];
+        }
+    }
+
     /// Get entity health
     pub fn get_health(&self, id: u32) -> f32 {
         if let Some(idx) = self.valid_index(id) {
@@ -271,6 +279,16 @@ impl WasmSimulation {
     /// Count active entities
     pub fn active_entity_count(&self) -> usize {
         self.inner.entities.active_ids().len()
+    }
+
+    /// Active entity IDs in the same order as read_states().
+    pub fn active_entity_ids(&self, max_entities: usize) -> Vec<u32> {
+        self.inner
+            .entities
+            .active_ids()
+            .into_iter()
+            .take(max_entities)
+            .collect()
     }
 
     // --- Event access ---

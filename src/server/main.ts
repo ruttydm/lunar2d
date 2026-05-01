@@ -355,6 +355,7 @@ class GameServer {
   private broadcastState() {
     // Read all entity states
     const states = this.sim.read_states(1000);
+    const ids = this.sim.active_entity_ids(1000);
     const floatsPerEntity = 15;
     const count = states.length / floatsPerEntity;
 
@@ -363,7 +364,7 @@ class GameServer {
     for (let i = 0; i < count; i++) {
       const o = i * floatsPerEntity;
       entities.push({
-        // We'll need entity IDs in the state buffer — for now, send as-is
+        id: ids[i] ?? i,
         x: states[o], y: states[o + 1], z: states[o + 2],
         vx: states[o + 3], vy: states[o + 4], vz: states[o + 5],
         qx: states[o + 6], qy: states[o + 7], qz: states[o + 8], qw: states[o + 9],

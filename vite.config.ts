@@ -12,6 +12,11 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       external: ['/lunar_physics_wasm.js'],
+      output: {
+        manualChunks: {
+          three: ['three'],
+        },
+      },
     },
   },
   resolve: {

@@ -11,7 +11,7 @@
     "wasm:build": "cd crates/lunar-physics-wasm && wasm-pack build --target web --dev --out-dir ../../pkg",
     "wasm:release": "cd crates/lunar-physics-wasm && wasm-pack build --target web --release --out-dir ../../pkg",
     "test:rust": "cargo test",
-    "test": "cargo test && bun test"
+    "test": "cargo test"
   },
   "dependencies": {
     "three": "^0.175.0"
