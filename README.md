@@ -1,43 +1,53 @@
-# Lunar3D
+# Lunar2D
 
-## How to Run
+Playable 2D orbital lander built with TypeScript, Canvas, Bun, and a small WebSocket relay.
 
-```
+## Run
 
-# 1. Start the game server (Bun)
-
-bun run src/server/main.ts
-
-# 2. In another terminal, start the client dev server
+```sh
+bun install
 bun run dev
-
-# 3. Open http://localhost:3000 in your browser
-
-# 4. (Optional) Connect to server at ws://localhost:3001)
-
-## Build WASM (# Only needed after changing Rust code)
-bun run wasm:release
-
-# Or rebuild WASM in dev mode (bun run wasm:dev for faster reload during dev)
-bun run wasm:build
-
-# For optimized production WASM
-bun run wasm:release
-
-## Run Rust tests
-bun run test:rust
-
-## Run all tests
-bun run test
 ```
+
+Open `http://localhost:3000`.
+
+For multiplayer relay during local development:
+
+```sh
+bun run server
+```
+
+The dev client uses `ws://localhost:3001` when served from port `3000`.
+
+## Validate
+
+```sh
+bun run check
+bun run test:e2e
+```
+
+`bun run check` runs TypeScript, unit tests, production build, and a server bundle check.
 
 ## Docker
 
-Build and run the combined client + multiplayer server image:
-
 ```sh
-docker build -t lunar3d .
-docker run --rm -p 3001:3001 lunar3d
+docker build -t lunar2d .
+docker run --rm -p 3001:3001 lunar2d
 ```
 
-Open http://localhost:3001. The client and WebSocket multiplayer server use the same port in the container.
+Open `http://localhost:3001`. The container serves the built client and WebSocket relay from the same Bun process.
+
+## Architecture
+
+The active runtime is TypeScript-only. The old Rust/WASM prototype path was removed because it was not used by the live 2D game.
+
+Key areas:
+
+- `src/client/src/game.ts`: orchestration and remaining canvas gameplay glue.
+- `src/client/src/domain/model.ts`: bodies, landers, constants, and shared state types.
+- `src/client/src/physics/`: tested pure flight and terrain helpers.
+- `src/client/src/systems/`: small gameplay systems such as engine status.
+- `src/client/src/audio/`: generated Web Audio engine and event sounds.
+- `src/client/src/network/`: WebSocket relay client.
+- `tests/physics/` and `tests/systems/`: Bun unit/regression tests.
+- `tests/e2e/`: Playwright browser smoke tests.

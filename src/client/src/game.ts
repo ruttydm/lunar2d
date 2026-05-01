@@ -3,369 +3,70 @@
  */
 
 import { InputManager } from './controls';
-
-interface Vec2 {
-  x: number;
-  y: number;
-}
-
-interface Pad {
-  id: number;
-  name: string;
-  x: number;
-  y: number;
-  radius: number;
-  angle: number;
-  platformRadius: number;
-  damaged: boolean;
-}
-
-interface Portal {
-  id: string;
-  label: string;
-  x: number;
-  y: number;
-  radius: number;
-  color: string;
-  url: string;
-}
-
-interface Projectile {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  age: number;
-  armed: boolean;
-}
-
-interface RemotePlayer {
-  id: number;
-  name: string;
-  bodyId: string;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  angle: number;
-  hp: number;
-  throttle: number;
-  updatedAt: number;
-}
-
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  maxLife: number;
-  color: string;
-  size: number;
-}
-
-interface TerrainSample {
-  angle: number;
-  radius: number;
-}
-
-interface LanderSnapshot {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  angle: number;
-  angularVelocity: number;
-  fuel: number;
-  hp: number;
-}
-
-interface ContactPoint {
-  label: 'left-leg' | 'right-leg' | 'hull';
-  point: Vec2;
-  bodyPoint: Vec2;
-  penetration: number;
-  normal: Vec2;
-  tangent: Vec2;
-  footVelocity: Vec2;
-  radialVelocity: number;
-  tangentVelocity: number;
-}
-
-interface LanderStats {
-  name: string;
-  mass: number;
-  maxTwr: number;
-  fuel: number;
-  hp: number;
-  rotation: number;
-  color: string;
-}
-
-interface CelestialBody {
-  id: string;
-  name: string;
-  type: string;
-  gravityMps2: number;
-  radiusM: number;
-  gameRadiusM: number;
-  terrainScale: number;
-  terrainAmp: number;
-  craterRate: number;
-  skyTop: string;
-  skyMid: string;
-  horizon: string;
-  groundTop: string;
-  groundMid: string;
-  groundBottom: string;
-  ridgeFar: string;
-  ridgeNear: string;
-  surfaceLine: string;
-  padNames: string[];
-}
-
-const REAL_MOON_RADIUS_M = 1_737_400;
-const GAME_MOON_RADIUS_M = 42_000;
-const WORLD_METERS_PER_UNIT = 0.25;
-const MOON_GRAVITY_MPS2 = 1.625;
-const PHYSICS_STEP = 1 / 120;
-const TERRAIN_SAMPLE_COUNT = 2048;
-const RCS_ACCEL = 0.95 / WORLD_METERS_PER_UNIT;
-const RCS_VERTICAL_ACCEL = 0.65 / WORLD_METERS_PER_UNIT;
-const LEG_SPRING = 42;
-const LEG_DAMPING = 14;
-const LEG_FRICTION = 3.2;
-const LEG_TORQUE_RESPONSE = 0.0026;
-const LEG_RESTITUTION = 0.12;
-const GROUND_CLEARANCE_BUFFER = 1.8;
-const BRAKING_INTENT_DOT_THRESHOLD = -0.02;
-const LANDER_COLLISION_RADIUS = 25;
-const PROJECTILE_RADIUS = 3.2;
-const PROJECTILE_ARM_TIME = 0.32;
-const PROJECTILE_LIFE_SECONDS = 180;
-const PROJECTILE_COOLDOWN_SECONDS = 0.9;
-const PROJECTILE_MUZZLE_SPEED = 82;
-const PROJECTILE_MIN_MUZZLE_SPEED = 34;
-const PROJECTILE_ESCAPE_SPEED_FRACTION = 0.72;
-const PROJECTILE_DAMAGE = 72;
-const VIBE_JAM_PORTAL_URL = 'https://vibejam.cc/portal/2026';
-const MULTIPLAYER_PROTOCOL = location.protocol === 'https:' ? 'wss' : 'ws';
-const MULTIPLAYER_PORT = location.port === '3000' ? '3001' : location.port;
-const MULTIPLAYER_URL = `${MULTIPLAYER_PROTOCOL}://${location.hostname}${MULTIPLAYER_PORT ? `:${MULTIPLAYER_PORT}` : ''}`;
-const PILOT_ADJECTIVES = ['Nova', 'Apex', 'Vector', 'Comet', 'Ranger', 'Echo', 'Zenith', 'Atlas'];
-const PILOT_NOUNS = ['Falcon', 'Drift', 'Surveyor', 'Beacon', 'Nomad', 'Arrow', 'Orbit', 'Strider'];
-
-function generatePilotName() {
-  const adjective = PILOT_ADJECTIVES[Math.floor(Math.random() * PILOT_ADJECTIVES.length)];
-  const noun = PILOT_NOUNS[Math.floor(Math.random() * PILOT_NOUNS.length)];
-  const number = Math.floor(Math.random() * 90 + 10);
-  return `${adjective} ${noun}-${number}`;
-}
-const LEG_POINTS = [
-  { x: -30, y: 30 },
-  { x: 30, y: 30 },
-];
-const HULL_BOTTOM = 22;
-
-const LANDERS: LanderStats[] = [
-  { name: 'Scout', mass: 650, maxTwr: 2.9, fuel: 75, hp: 70, rotation: 3.1, color: '#56b6ff' },
-  { name: 'Standard', mass: 1000, maxTwr: 2.55, fuel: 110, hp: 100, rotation: 2.35, color: '#f4f7f8' },
-  { name: 'Heavy', mass: 1600, maxTwr: 2.25, fuel: 165, hp: 160, rotation: 1.55, color: '#ffb35a' },
-  { name: 'Interceptor', mass: 820, maxTwr: 3.15, fuel: 90, hp: 85, rotation: 2.85, color: '#ff6862' },
-];
-
-const BODIES: CelestialBody[] = [
-  {
-    id: 'moon',
-    name: 'Moon',
-    type: 'moon',
-    gravityMps2: MOON_GRAVITY_MPS2,
-    radiusM: REAL_MOON_RADIUS_M,
-    gameRadiusM: GAME_MOON_RADIUS_M,
-    terrainScale: 1,
-    terrainAmp: 1,
-    craterRate: 0.28,
-    skyTop: '#172338',
-    skyMid: '#202836',
-    horizon: '#d6d1c1',
-    groundTop: '#aaa69a',
-    groundMid: '#848176',
-    groundBottom: '#5b584f',
-    ridgeFar: 'rgba(154,150,139,0.42)',
-    ridgeNear: 'rgba(119,116,108,0.52)',
-    surfaceLine: '#e4ddc8',
-    padNames: ['Tranquility', 'Hadley', 'Kepler', 'Tycho', 'Faraday'],
-  },
-  {
-    id: 'mars',
-    name: 'Mars',
-    type: 'planet',
-    gravityMps2: 3.721,
-    radiusM: 3_389_500,
-    gameRadiusM: 58_000,
-    terrainScale: 0.82,
-    terrainAmp: 1.18,
-    craterRate: 0.34,
-    skyTop: '#6f8aa6',
-    skyMid: '#b0856a',
-    horizon: '#e2b982',
-    groundTop: '#b67953',
-    groundMid: '#865139',
-    groundBottom: '#573222',
-    ridgeFar: 'rgba(156,100,76,0.45)',
-    ridgeNear: 'rgba(112,68,48,0.56)',
-    surfaceLine: '#efc39a',
-    padNames: ['Ares Vallis', 'Elysium', 'Gale', 'Utopia', 'Noctis'],
-  },
-  {
-    id: 'mercury',
-    name: 'Mercury',
-    type: 'planet',
-    gravityMps2: 3.7,
-    radiusM: 2_439_700,
-    gameRadiusM: 50_000,
-    terrainScale: 1.16,
-    terrainAmp: 0.92,
-    craterRate: 0.18,
-    skyTop: '#20242d',
-    skyMid: '#3a3a37',
-    horizon: '#e6dbc4',
-    groundTop: '#bdb4a2',
-    groundMid: '#7f7666',
-    groundBottom: '#514b42',
-    ridgeFar: 'rgba(166,157,139,0.40)',
-    ridgeNear: 'rgba(104,96,82,0.56)',
-    surfaceLine: '#f1e6ce',
-    padNames: ['Caloris', 'Tolstoj', 'Borealis', 'Discovery', 'Kuiper'],
-  },
-  {
-    id: 'europa',
-    name: 'Europa',
-    type: 'moon',
-    gravityMps2: 1.315,
-    radiusM: 1_560_800,
-    gameRadiusM: 38_000,
-    terrainScale: 1.45,
-    terrainAmp: 0.58,
-    craterRate: 0.52,
-    skyTop: '#102135',
-    skyMid: '#1c344a',
-    horizon: '#e8f3ee',
-    groundTop: '#d8d7ca',
-    groundMid: '#a69f8e',
-    groundBottom: '#655d54',
-    ridgeFar: 'rgba(190,198,193,0.38)',
-    ridgeNear: 'rgba(141,132,118,0.52)',
-    surfaceLine: '#fff9df',
-    padNames: ['Conamara', 'Minos', 'Pwyll', 'Tara', 'Cadmus'],
-  },
-  {
-    id: 'titan',
-    name: 'Titan',
-    type: 'moon',
-    gravityMps2: 1.352,
-    radiusM: 2_574_730,
-    gameRadiusM: 44_000,
-    terrainScale: 0.9,
-    terrainAmp: 0.84,
-    craterRate: 0.48,
-    skyTop: '#5e5446',
-    skyMid: '#b78c4a',
-    horizon: '#e1b65c',
-    groundTop: '#9c7a43',
-    groundMid: '#73562f',
-    groundBottom: '#3f3222',
-    ridgeFar: 'rgba(153,118,65,0.42)',
-    ridgeNear: 'rgba(105,78,43,0.58)',
-    surfaceLine: '#f3cf78',
-    padNames: ['Shangri-La', 'Xanadu', 'Adiri', 'Belet', 'Hotei'],
-  },
-  {
-    id: 'ganymede',
-    name: 'Ganymede',
-    type: 'moon',
-    gravityMps2: 1.428,
-    radiusM: 2_634_100,
-    gameRadiusM: 46_000,
-    terrainScale: 1.05,
-    terrainAmp: 0.78,
-    craterRate: 0.36,
-    skyTop: '#152233',
-    skyMid: '#273243',
-    horizon: '#cec3a9',
-    groundTop: '#a79c87',
-    groundMid: '#756b5c',
-    groundBottom: '#484139',
-    ridgeFar: 'rgba(144,136,119,0.42)',
-    ridgeNear: 'rgba(92,84,72,0.55)',
-    surfaceLine: '#e6dcc5',
-    padNames: ['Galileo', 'Uruk', 'Marius', 'Nicholson', 'Sippar'],
-  },
-  {
-    id: 'enceladus',
-    name: 'Enceladus',
-    type: 'moon',
-    gravityMps2: 0.113,
-    radiusM: 252_100,
-    gameRadiusM: 16_000,
-    terrainScale: 2.1,
-    terrainAmp: 0.48,
-    craterRate: 0.55,
-    skyTop: '#0d2031',
-    skyMid: '#173247',
-    horizon: '#f1fbff',
-    groundTop: '#f2f1e8',
-    groundMid: '#c4c7c3',
-    groundBottom: '#81898a',
-    ridgeFar: 'rgba(215,224,226,0.38)',
-    ridgeNear: 'rgba(164,174,176,0.52)',
-    surfaceLine: '#ffffff',
-    padNames: ['Damascus', 'Cairo', 'Alexandria', 'Baghdad', 'Tiger'],
-  },
-  {
-    id: 'ceres',
-    name: 'Ceres',
-    type: 'dwarf',
-    gravityMps2: 0.284,
-    radiusM: 473_000,
-    gameRadiusM: 22_000,
-    terrainScale: 1.65,
-    terrainAmp: 0.7,
-    craterRate: 0.4,
-    skyTop: '#18202b',
-    skyMid: '#2a2e34',
-    horizon: '#c7c1b3',
-    groundTop: '#918c82',
-    groundMid: '#69645d',
-    groundBottom: '#3e3b37',
-    ridgeFar: 'rgba(130,126,118,0.42)',
-    ridgeNear: 'rgba(86,82,76,0.55)',
-    surfaceLine: '#d8d0c0',
-    padNames: ['Occator', 'Ahuna', 'Kerwan', 'Dantu', 'Haulani'],
-  },
-  {
-    id: 'pluto',
-    name: 'Pluto',
-    type: 'dwarf',
-    gravityMps2: 0.62,
-    radiusM: 1_188_300,
-    gameRadiusM: 30_000,
-    terrainScale: 1.25,
-    terrainAmp: 0.68,
-    craterRate: 0.46,
-    skyTop: '#111f35',
-    skyMid: '#2b3147',
-    horizon: '#d2b7a3',
-    groundTop: '#c9a994',
-    groundMid: '#8b6f67',
-    groundBottom: '#55434a',
-    ridgeFar: 'rgba(164,133,122,0.42)',
-    ridgeNear: 'rgba(103,79,82,0.54)',
-    surfaceLine: '#efd2bd',
-    padNames: ['Sputnik', 'Tombaugh', 'Burney', 'Lowell', 'Voyager'],
-  },
-];
+import { AudioSystem } from './audio/AudioSystem';
+import { MultiplayerClient } from './network/MultiplayerClient';
+import {
+  BODIES,
+  BRAKING_INTENT_DOT_THRESHOLD,
+  GROUND_CLEARANCE_BUFFER,
+  HULL_BOTTOM,
+  LANDER_COLLISION_RADIUS,
+  LANDERS,
+  LEG_DAMPING,
+  LEG_FRICTION,
+  LEG_POINTS,
+  LEG_RESTITUTION,
+  LEG_SPRING,
+  LEG_TORQUE_RESPONSE,
+  MOON_GRAVITY_MPS2,
+  MULTIPLAYER_URL,
+  PHYSICS_STEP,
+  PROJECTILE_ARM_TIME,
+  PROJECTILE_COOLDOWN_SECONDS,
+  PROJECTILE_DAMAGE,
+  PROJECTILE_ESCAPE_SPEED_FRACTION,
+  PROJECTILE_LIFE_SECONDS,
+  PROJECTILE_MIN_MUZZLE_SPEED,
+  PROJECTILE_MUZZLE_SPEED,
+  PROJECTILE_RADIUS,
+  RCS_ACCEL,
+  RCS_VERTICAL_ACCEL,
+  TERRAIN_SAMPLE_COUNT,
+  VIBE_JAM_PORTAL_URL,
+  WORLD_METERS_PER_UNIT,
+  generatePilotName,
+  type CelestialBody,
+  type ContactPoint,
+  type LanderSnapshot,
+  type Pad,
+  type Particle,
+  type Portal,
+  type Projectile,
+  type TerrainSample,
+  type Vec2,
+} from './domain/model';
+import {
+  hasBrakingIntent,
+  lerp,
+  normalizeAngle,
+  bodyPointToWorld as bodyPointToWorldInFrame,
+  normalizedDirection,
+  positiveAngle,
+  preventBrakingBurnSpeedup,
+  projectileLaunchVelocity,
+} from './physics/flight';
+import {
+  baseTerrainRadiusAtAngle,
+  normalAtAngle,
+  padPlatformRadius,
+  rawTerrainRadiusAtAngle,
+  rebuildTerrainCache,
+  surfaceDistance,
+  surfacePoint,
+  terrainRadiusAtAngle,
+} from './physics/terrain';
+import { canApplyMainThrust, resolveEngineStatus } from './systems/engine';
+import { nextObjectivePhase, objectiveText, type ObjectivePhase } from './systems/objectives';
 
 export class Game {
   private canvas!: HTMLCanvasElement;
@@ -395,7 +96,7 @@ export class Game {
   private landed = false;
   private destroyed = false;
   private debugOverlay = false;
-  private objectivePhase: 'land' | 'orbit' | 'return' = 'land';
+  private objectivePhase: ObjectivePhase = 'land';
   private lastImpactReport = 'nominal';
 
   private lander = {
@@ -416,16 +117,10 @@ export class Game {
   private minimapCanvas: HTMLCanvasElement | null = null;
   private navballCanvas: HTMLCanvasElement | null = null;
 
-  private audioContext: AudioContext | null = null;
-  private engineOsc: OscillatorNode | null = null;
-  private engineGain: GainNode | null = null;
-  private masterGain: GainNode | null = null;
+  private audio = new AudioSystem();
   private lastWarningAt = 0;
-  private multiplayerSocket: WebSocket | null = null;
-  private multiplayerId = 0;
   private multiplayerName = generatePilotName();
-  private multiplayerSendTimer = 0;
-  private remotePlayers: Map<number, RemotePlayer> = new Map();
+  private multiplayer = new MultiplayerClient(MULTIPLAYER_URL);
   private portalParams = new URLSearchParams(location.search);
   private portalCooldown = 1.2;
 
@@ -505,65 +200,11 @@ export class Game {
   }
 
   private connectMultiplayer() {
-    try {
-      const socket = new WebSocket(MULTIPLAYER_URL);
-      this.multiplayerSocket = socket;
-      socket.addEventListener('open', () => {
-        this.sendMultiplayer({
-          type: 'hello',
-          name: this.multiplayerName,
-        });
-      });
-      socket.addEventListener('message', (event) => this.handleMultiplayerMessage(event.data));
-      socket.addEventListener('close', () => {
-        this.multiplayerSocket = null;
-        this.remotePlayers.clear();
-      });
-      socket.addEventListener('error', () => {
-        socket.close();
-      });
-    } catch {
-      this.multiplayerSocket = null;
-    }
-  }
-
-  private handleMultiplayerMessage(raw: string) {
-    try {
-      const data = JSON.parse(raw);
-      if (data.type === 'welcome') {
-        this.multiplayerId = data.id;
-        return;
-      }
-      if (data.type === 'peer-left') {
-        this.remotePlayers.delete(data.id);
-        return;
-      }
-      if (data.type !== 'state' || data.id === this.multiplayerId) return;
-      this.remotePlayers.set(data.id, {
-        id: data.id,
-        name: data.name || `Pilot ${data.id}`,
-        bodyId: data.bodyId || 'moon',
-        x: Number(data.x) || 0,
-        y: Number(data.y) || 0,
-        vx: Number(data.vx) || 0,
-        vy: Number(data.vy) || 0,
-        angle: Number(data.angle) || 0,
-        hp: Number(data.hp) || 0,
-        throttle: Number(data.throttle) || 0,
-        updatedAt: performance.now(),
-      });
-    } catch {
-      // Ignore malformed relay packets.
-    }
+    this.multiplayer.connect(this.multiplayerName);
   }
 
   private updateMultiplayer(dt: number) {
-    if (!this.multiplayerSocket || this.multiplayerSocket.readyState !== WebSocket.OPEN) return;
-    this.multiplayerSendTimer -= dt;
-    if (this.multiplayerSendTimer > 0) return;
-    this.multiplayerSendTimer = 1 / 15;
-    this.sendMultiplayer({
-      type: 'state',
+    this.multiplayer.update(dt, {
       name: this.multiplayerName,
       bodyId: this.currentBody().id,
       x: this.lander.x,
@@ -575,11 +216,6 @@ export class Game {
       throttle: this.input.state.throttle,
       score: this.score,
     });
-  }
-
-  private sendMultiplayer(data: Record<string, unknown>) {
-    if (!this.multiplayerSocket || this.multiplayerSocket.readyState !== WebSocket.OPEN) return;
-    this.multiplayerSocket.send(JSON.stringify(data));
   }
 
   private buildPortalUrl(destination: string) {
@@ -794,7 +430,7 @@ export class Game {
     if (s.fineControl) angularInput *= 0.35;
     this.lander.angularVelocity += angularInput * stats.rotation * dt;
     this.lander.angularVelocity *= Math.pow(0.18, dt);
-    this.lander.angle = this.normalizeAngle(this.lander.angle + this.lander.angularVelocity * dt);
+    this.lander.angle = normalizeAngle(this.lander.angle + this.lander.angularVelocity * dt);
 
     const stepStartVelocity = { x: this.lander.vx, y: this.lander.vy };
     const stepStartSpeed = Math.hypot(stepStartVelocity.x, stepStartVelocity.y);
@@ -802,23 +438,24 @@ export class Game {
     const brakeThrottle = brakeAlignment > 0.58 ? 0.25 + brakeAlignment * 0.65 : 0;
     const throttle = s.brakeAssist ? Math.max(s.throttle, brakeThrottle) : s.throttle;
     let brakingBurnSpeedLimit: number | null = null;
-    if (throttle > 0.01 && this.lander.fuel > 0) {
+    const engineStatus = this.engineStatus();
+    if (throttle > 0.01 && canApplyMainThrust(engineStatus)) {
       const boost = s.boost ? 1.35 : 1;
       const thrust = this.lunarRatedEngineAccel() * stats.maxTwr * throttle * boost;
       const dir = this.thrustDirection();
-      if (this.hasBrakingIntent(dir, stepStartVelocity)) {
+      if (hasBrakingIntent(dir, stepStartVelocity, BRAKING_INTENT_DOT_THRESHOLD)) {
         brakingBurnSpeedLimit = stepStartSpeed;
       }
       this.lander.vx += dir.x * thrust * dt;
       this.lander.vy += dir.y * thrust * dt;
       if (brakingBurnSpeedLimit !== null) {
-        this.preventBrakingBurnSpeedup(brakingBurnSpeedLimit);
+        this.applyBrakingSpeedLimit(brakingBurnSpeedLimit);
       }
       this.lander.fuel = Math.max(0, this.lander.fuel - throttle * boost * stats.fuel / 58 * dt);
       this.emitExhaust(dt, throttle);
     }
 
-    if (s.rcsMode && this.lander.fuel > 0) {
+    if (s.rcsMode && canApplyMainThrust(engineStatus)) {
       const frame = this.localFrame(this.lander);
       const radialAccel = -s.translateZ * RCS_ACCEL + s.translateY * RCS_VERTICAL_ACCEL;
       const tangentialAccel = s.translateX * RCS_ACCEL;
@@ -829,14 +466,14 @@ export class Game {
       const accelMagnitude = Math.hypot(accel.x, accel.y);
       if (accelMagnitude > 0.01) {
         const rcsDirection = { x: accel.x / accelMagnitude, y: accel.y / accelMagnitude };
-        if (this.hasBrakingIntent(rcsDirection, stepStartVelocity)) {
+        if (hasBrakingIntent(rcsDirection, stepStartVelocity, BRAKING_INTENT_DOT_THRESHOLD)) {
           brakingBurnSpeedLimit = stepStartSpeed;
         }
       }
       this.lander.vx += accel.x * dt;
       this.lander.vy += accel.y * dt;
       if (brakingBurnSpeedLimit !== null) {
-        this.preventBrakingBurnSpeedup(brakingBurnSpeedLimit);
+        this.applyBrakingSpeedLimit(brakingBurnSpeedLimit);
       }
       this.lander.fuel = Math.max(0, this.lander.fuel - (Math.abs(s.translateX) + Math.abs(s.translateZ) + Math.abs(s.translateY)) * 0.12 * dt);
     }
@@ -845,7 +482,7 @@ export class Game {
     this.lander.vx -= gravityNormal.x * this.gravity() * dt;
     this.lander.vy -= gravityNormal.y * this.gravity() * dt;
     if (brakingBurnSpeedLimit !== null) {
-      this.preventBrakingBurnSpeedup(brakingBurnSpeedLimit);
+      this.applyBrakingSpeedLimit(brakingBurnSpeedLimit);
     }
     this.lander.x += this.lander.vx * dt;
     this.lander.y += this.lander.vy * dt;
@@ -866,8 +503,8 @@ export class Game {
     const speed = Math.hypot(this.lander.vx, this.lander.vy);
     if (speed < 0.5) return;
     const desired = Math.atan2(-this.lander.vx / speed, -this.lander.vy / speed);
-    const error = this.normalizeAngle(desired - this.lander.angle);
-    this.lander.angle = this.normalizeAngle(this.lander.angle + error * Math.min(1, dt * 4.5));
+    const error = normalizeAngle(desired - this.lander.angle);
+    this.lander.angle = normalizeAngle(this.lander.angle + error * Math.min(1, dt * 4.5));
     this.lander.angularVelocity += error * 6.0 * dt;
   }
 
@@ -878,20 +515,10 @@ export class Game {
     return Math.max(0, -(thrust.x * this.lander.vx + thrust.y * this.lander.vy) / speed);
   }
 
-  private hasBrakingIntent(direction: Vec2, velocity: Vec2) {
-    const speed = Math.hypot(velocity.x, velocity.y);
-    if (speed < 0.5) return false;
-    const directionLength = Math.hypot(direction.x, direction.y) || 1;
-    const alongVelocity = (direction.x * velocity.x + direction.y * velocity.y) / (speed * directionLength);
-    return alongVelocity < BRAKING_INTENT_DOT_THRESHOLD;
-  }
-
-  private preventBrakingBurnSpeedup(previousSpeed: number) {
-    const speed = Math.hypot(this.lander.vx, this.lander.vy);
-    if (speed <= previousSpeed) return;
-    const scale = previousSpeed / speed;
-    this.lander.vx *= scale;
-    this.lander.vy *= scale;
+  private applyBrakingSpeedLimit(previousSpeed: number) {
+    const velocity = preventBrakingBurnSpeedup({ x: this.lander.vx, y: this.lander.vy }, previousSpeed);
+    this.lander.vx = velocity.x;
+    this.lander.vy = velocity.y;
   }
 
   private landerSnapshot(): LanderSnapshot {
@@ -944,12 +571,12 @@ export class Game {
 
   private interpolateLanderSnapshot(a: LanderSnapshot, b: LanderSnapshot, t: number): LanderSnapshot {
     return {
-      x: this.lerp(a.x, b.x, t),
-      y: this.lerp(a.y, b.y, t),
-      vx: this.lerp(a.vx, b.vx, t),
-      vy: this.lerp(a.vy, b.vy, t),
-      angle: this.normalizeAngle(a.angle + this.normalizeAngle(b.angle - a.angle) * t),
-      angularVelocity: this.lerp(a.angularVelocity, b.angularVelocity, t),
+      x: lerp(a.x, b.x, t),
+      y: lerp(a.y, b.y, t),
+      vx: lerp(a.vx, b.vx, t),
+      vy: lerp(a.vy, b.vy, t),
+      angle: normalizeAngle(a.angle + normalizeAngle(b.angle - a.angle) * t),
+      angularVelocity: lerp(a.angularVelocity, b.angularVelocity, t),
       fuel: b.fuel,
       hp: b.hp,
     };
@@ -1000,7 +627,7 @@ export class Game {
     const pad = this.padAtPoint(deepestContact.point) ?? this.padAtPoint(this.lander);
     const horizontalSpeed = Math.abs(this.toMetersPerSecond(this.tangentialVelocity(this.lander)));
     const impactSpeed = this.toMetersPerSecond(maxImpactSpeed);
-    const tilt = Math.abs(this.normalizeAngle(this.lander.angle - this.localUpAngleAt(this.angleOf(this.lander))));
+    const tilt = Math.abs(normalizeAngle(this.lander.angle - this.localUpAngleAt(this.angleOf(this.lander))));
     const bothFeetSupported = footContacts.length === LEG_POINTS.length;
     const soft = bothFeetSupported && !hullContact && impactSpeed < 5.8 && horizontalSpeed < 4.2 && tilt < 0.38;
     this.lastImpactReport = `${impactSpeed.toFixed(1)}m/s V ${horizontalSpeed.toFixed(1)}m/s H`;
@@ -1053,7 +680,15 @@ export class Game {
   private fireProjectile() {
     const dir = this.forwardDirection();
     const muzzle = this.bodyPointToWorld({ x: 0, y: -42 });
-    const velocity = this.projectileLaunchVelocity(muzzle, dir);
+    const velocity = projectileLaunchVelocity({
+      origin: muzzle,
+      inheritedVelocity: { x: this.lander.vx, y: this.lander.vy },
+      direction: dir,
+      gravity: this.gravity(),
+      muzzleSpeed: PROJECTILE_MUZZLE_SPEED,
+      minMuzzleSpeed: PROJECTILE_MIN_MUZZLE_SPEED,
+      escapeSpeedFraction: PROJECTILE_ESCAPE_SPEED_FRACTION,
+    });
     this.projectiles.push({
       x: muzzle.x + dir.x * 12,
       y: muzzle.y + dir.y * 12,
@@ -1065,40 +700,6 @@ export class Game {
     });
     this.fireCooldown = PROJECTILE_COOLDOWN_SECONDS;
     this.playBurst(420, 0.08, 'square', 0.12);
-  }
-
-  private projectileLaunchVelocity(origin: Vec2, direction: Vec2) {
-    const muzzleSpeed = this.cappedMuzzleSpeed(origin, direction);
-    return {
-      x: this.lander.vx + direction.x * muzzleSpeed,
-      y: this.lander.vy + direction.y * muzzleSpeed,
-    };
-  }
-
-  private cappedMuzzleSpeed(origin: Vec2, direction: Vec2) {
-    const localEscapeSpeed = Math.sqrt(2 * this.gravity() * Math.max(1, Math.hypot(origin.x, origin.y)));
-    const maxSpeed = localEscapeSpeed * PROJECTILE_ESCAPE_SPEED_FRACTION;
-    const inheritedVelocity = { x: this.lander.vx, y: this.lander.vy };
-    const fullVelocity = {
-      x: inheritedVelocity.x + direction.x * PROJECTILE_MUZZLE_SPEED,
-      y: inheritedVelocity.y + direction.y * PROJECTILE_MUZZLE_SPEED,
-    };
-    if (Math.hypot(fullVelocity.x, fullVelocity.y) <= maxSpeed) {
-      return PROJECTILE_MUZZLE_SPEED;
-    }
-
-    const inheritedSpeed = Math.hypot(inheritedVelocity.x, inheritedVelocity.y);
-    const alongDirection = inheritedVelocity.x * direction.x + inheritedVelocity.y * direction.y;
-    const discriminant = alongDirection * alongDirection - (inheritedSpeed * inheritedSpeed - maxSpeed * maxSpeed);
-    if (discriminant <= 0) {
-      return PROJECTILE_MIN_MUZZLE_SPEED;
-    }
-
-    const allowed = -alongDirection + Math.sqrt(discriminant);
-    if (allowed <= 0) {
-      return PROJECTILE_MIN_MUZZLE_SPEED;
-    }
-    return Math.max(PROJECTILE_MIN_MUZZLE_SPEED, Math.min(PROJECTILE_MUZZLE_SPEED, allowed));
   }
 
   private updateProjectiles(dt: number) {
@@ -1134,15 +735,15 @@ export class Game {
     for (let i = 0; i < 8; i++) {
       const mid = (lo + hi) * 0.5;
       const sample = {
-        x: this.lerp(previous.x, projectile.x, mid),
-        y: this.lerp(previous.y, projectile.y, mid),
+        x: lerp(previous.x, projectile.x, mid),
+        y: lerp(previous.y, projectile.y, mid),
       };
       if (this.surfacePenetration(sample) < 0) lo = mid;
       else hi = mid;
     }
     const hit = {
-      x: this.lerp(previous.x, projectile.x, hi),
-      y: this.lerp(previous.y, projectile.y, hi),
+      x: lerp(previous.x, projectile.x, hi),
+      y: lerp(previous.y, projectile.y, hi),
     };
     return this.surfacePoint(this.angleOf(hit), 2);
   }
@@ -1205,14 +806,21 @@ export class Game {
   }
 
   private updateObjectivePhase() {
-    if (this.destroyed || this.landed) return;
-    if (this.objectivePhase !== 'orbit') return;
     const altitude = this.groundClearance();
     const speed = Math.hypot(this.lander.vx, this.lander.vy);
     const orbitalSpeed = Math.sqrt(this.gravity() * Math.max(1, Math.hypot(this.lander.x, this.lander.y)));
     const radial = Math.abs(this.radialVelocity(this.lander));
-    if (altitude > 900 && radial < 5 && Math.abs(speed - orbitalSpeed) / orbitalSpeed < 0.22) {
-      this.objectivePhase = 'return';
+    const next = nextObjectivePhase({
+      phase: this.objectivePhase,
+      destroyed: this.destroyed,
+      landed: this.landed,
+      altitude,
+      speed,
+      orbitalSpeed,
+      radialSpeed: radial,
+    });
+    if (next.completedOrbit) {
+      this.objectivePhase = next.phase;
       this.score += 250;
       this.spawnImpactFx(this.lander.x, this.lander.y, '#84ffd3', 14);
       this.playLandingTone();
@@ -1234,8 +842,8 @@ export class Game {
     const landingFocus = Math.max(0, Math.min(1, 1 - altitude / 280));
     const surfaceLift = 70 * nearSurface;
     const velocityBias = Math.max(0.25, 1 - landingFocus * 0.68);
-    this.cameraTarget.x = this.lerp(this.lander.x + lookAhead.x * velocityBias + normal.x * surfaceLift, pad.x, targetBlend);
-    this.cameraTarget.y = this.lerp(this.lander.y + lookAhead.y * velocityBias + normal.y * surfaceLift, pad.y, targetBlend);
+    this.cameraTarget.x = lerp(this.lander.x + lookAhead.x * velocityBias + normal.x * surfaceLift, pad.x, targetBlend);
+    this.cameraTarget.y = lerp(this.lander.y + lookAhead.y * velocityBias + normal.y * surfaceLift, pad.y, targetBlend);
 
     const desiredSpan = this.input.state.mapView
       ? this.bodyRadiusUnits() * 2.35
@@ -1243,16 +851,16 @@ export class Game {
     const autoZoom = Math.min(this.width, this.height) / desiredSpan;
     this.cameraTarget.zoom = Math.max(0.18, Math.min(1.55, autoZoom));
     this.cameraTarget.zoom *= 1 - Math.max(0, Math.min(0.25, this.input.state.cameraZoom * 0.02));
-    const localRotation = this.normalizeAngle(Math.PI / 2 - this.angleOf(this.lander));
+    const localRotation = normalizeAngle(Math.PI / 2 - this.angleOf(this.lander));
     const rotationBlend = Math.max(0, Math.min(1, 1 - (altitude - 900) / 1500));
-    this.cameraTarget.rotation = this.input.state.mapView ? 0 : this.normalizeAngle(localRotation * rotationBlend);
+    this.cameraTarget.rotation = this.input.state.mapView ? 0 : normalizeAngle(localRotation * rotationBlend);
 
     const t = 1 - Math.pow(0.00035, dt);
-    this.camera.x = this.lerp(this.camera.x, this.cameraTarget.x, t);
-    this.camera.y = this.lerp(this.camera.y, this.cameraTarget.y, t);
-    this.camera.zoom = this.lerp(this.camera.zoom, this.cameraTarget.zoom, t);
+    this.camera.x = lerp(this.camera.x, this.cameraTarget.x, t);
+    this.camera.y = lerp(this.camera.y, this.cameraTarget.y, t);
+    this.camera.zoom = lerp(this.camera.zoom, this.cameraTarget.zoom, t);
     const rotationT = 1 - Math.pow(0.0002, dt);
-    this.camera.rotation = this.normalizeAngle(this.camera.rotation + this.normalizeAngle(this.cameraTarget.rotation - this.camera.rotation) * rotationT);
+    this.camera.rotation = normalizeAngle(this.camera.rotation + normalizeAngle(this.cameraTarget.rotation - this.camera.rotation) * rotationT);
     this.input.state.cameraZoom = 0;
   }
 
@@ -1557,7 +1165,7 @@ export class Game {
   private landingSafetyColor() {
     const vertical = Math.abs(this.toMetersPerSecond(this.radialVelocity(this.lander)));
     const horizontal = Math.abs(this.toMetersPerSecond(this.tangentialVelocity(this.lander)));
-    const tilt = Math.abs(this.normalizeAngle(this.lander.angle - this.localUpAngleAt(this.angleOf(this.lander))));
+    const tilt = Math.abs(normalizeAngle(this.lander.angle - this.localUpAngleAt(this.angleOf(this.lander))));
     if (vertical < 5.8 && horizontal < 4.2 && tilt < 0.38) {
       return { line: 'rgba(132,255,211,0.86)', fill: '#84ffd3', label: 'SAFE' };
     }
@@ -1700,7 +1308,7 @@ export class Game {
 
   private drawRemotePlayers(ctx: CanvasRenderingContext2D) {
     const now = performance.now();
-    for (const remote of this.remotePlayers.values()) {
+    for (const remote of this.multiplayer.remotePlayers.values()) {
       if (remote.bodyId !== this.currentBody().id || now - remote.updatedAt > 5000) continue;
       const p = this.worldToScreen(remote);
       ctx.save();
@@ -1836,12 +1444,12 @@ export class Game {
     this.hudElements['sas-indicator'].classList.toggle('active', this.input.state.sasMode > 0);
     this.hudElements['rcs-indicator'].textContent = this.input.state.rcsMode ? 'RCS ON' : 'RCS OFF';
     this.hudElements['rcs-indicator'].classList.toggle('active', this.input.state.rcsMode);
-    this.hudElements['target-info'].textContent = `${target.name} ${distance.toFixed(0)}m | ${body.gravityMps2.toFixed(2)} m/s2`;
+    this.hudElements['target-info'].textContent = `${target.name} ${distance.toFixed(0)}m | ${body.gravityMps2.toFixed(2)} m/s2 | ENG ${this.engineStatus()}`;
     this.hudElements['objective-title'].textContent = objective.title;
     this.hudElements['objective-detail'].textContent = objective.detail;
     this.hudElements['perf-fps'].textContent = `${this.currentFps}`;
-    this.hudElements['perf-entities'].textContent = `${1 + this.remotePlayers.size + this.projectiles.length + this.particles.length}`;
-    this.hudElements['perf-draw'].textContent = this.multiplayerSocket?.readyState === WebSocket.OPEN ? '2D NET' : '2D';
+    this.hudElements['perf-entities'].textContent = `${1 + this.multiplayer.remotePlayers.size + this.projectiles.length + this.particles.length}`;
+    this.hudElements['perf-draw'].textContent = this.multiplayer.isConnected() ? '2D NET' : '2D';
 
     this.drawMinimap();
     this.drawNavball();
@@ -1955,25 +1563,25 @@ export class Game {
   private currentObjectiveText(localTwr: string) {
     const target = this.targetPad();
     const body = this.currentBody();
-    const impact = this.landingSafetyColor().label;
-    if (this.objectivePhase === 'orbit') {
-      const orbital = Math.sqrt(this.gravity() * Math.max(1, Math.hypot(this.lander.x, this.lander.y)));
-      const speed = Math.hypot(this.lander.vx, this.lander.vy);
-      return {
-        title: `ORBIT ${body.name.toUpperCase()}`,
-        detail: `hold ${this.toMetersPerSecond(orbital).toFixed(0)}m/s | now ${this.toMetersPerSecond(speed).toFixed(0)}m/s | M map`,
-      };
-    }
-    if (this.objectivePhase === 'return') {
-      return {
-        title: 'FIND PORTAL',
-        detail: 'three Vibe Jam portals are marked on the minimap',
-      };
-    }
-    return {
-      title: `LAND ${target.name.toUpperCase()}`,
-      detail: `${impact} | ${body.name} ${body.type} | ${LANDERS[this.selectedLander].name} TWR ${localTwr} | F3 debug`,
-    };
+    const orbital = Math.sqrt(this.gravity() * Math.max(1, Math.hypot(this.lander.x, this.lander.y)));
+    return objectiveText({
+      phase: this.objectivePhase,
+      targetName: target.name,
+      body,
+      lander: LANDERS[this.selectedLander],
+      localTwr,
+      landingSafety: this.landingSafetyColor().label,
+      orbitalSpeedMps: this.toMetersPerSecond(orbital),
+      currentSpeedMps: this.toMetersPerSecond(Math.hypot(this.lander.vx, this.lander.vy)),
+    });
+  }
+
+  private engineStatus() {
+    return resolveEngineStatus({
+      destroyed: this.destroyed,
+      landed: this.landed,
+      fuel: this.lander.fuel,
+    });
   }
 
   private drawNavball() {
@@ -2091,6 +1699,7 @@ export class Game {
     ctx.textAlign = 'left';
     const lines = [
       `F3 DEBUG  clearance ${this.toMeters(this.minGroundClearance(this.lander)).toFixed(1)}m`,
+      `engine ${this.engineStatus()}`,
       `impact ${this.lastImpactReport}`,
       `velocity ${this.toMetersPerSecond(Math.hypot(this.lander.vx, this.lander.vy)).toFixed(1)}m/s`,
       `penetration ${Math.max(0, ...contacts.map((c) => c.penetration)).toFixed(2)}u`,
@@ -2178,57 +1787,28 @@ export class Game {
   }
 
   private rebuildTerrainCache() {
-    this.terrainSamples = [];
-    for (let i = 0; i < TERRAIN_SAMPLE_COUNT; i++) {
-      const angle = (i / TERRAIN_SAMPLE_COUNT) * Math.PI * 2;
-      this.terrainSamples.push({ angle, radius: this.rawTerrainRadiusAtAngle(angle) });
-    }
+    this.terrainSamples = rebuildTerrainCache({
+      sampleCount: TERRAIN_SAMPLE_COUNT,
+      body: this.currentBody(),
+      bodyRadius: this.bodyRadiusUnits(),
+      pads: this.pads,
+    });
   }
 
   private padPlatformRadius(angle: number, radius: number) {
-    const halfAngle = radius / this.bodyRadiusUnits();
-    let maxRadius = this.baseTerrainRadiusAtAngle(angle);
-    const samples = 18;
-    for (let i = 0; i <= samples; i++) {
-      const t = i / samples;
-      const sampleAngle = angle - halfAngle + t * halfAngle * 2;
-      maxRadius = Math.max(maxRadius, this.baseTerrainRadiusAtAngle(sampleAngle));
-    }
-    return maxRadius + 14;
+    return padPlatformRadius(angle, radius, this.currentBody(), this.bodyRadiusUnits());
   }
 
   private rawTerrainRadiusAtAngle(angle: number) {
-    const base = this.baseTerrainRadiusAtAngle(angle);
-    for (const pad of this.pads) {
-      const distance = this.surfaceDistance(angle, pad.angle);
-      if (distance <= pad.radius) return pad.platformRadius;
-      if (distance <= pad.radius * 1.7) {
-        const t = (distance - pad.radius) / (pad.radius * 0.7);
-        const smooth = t * t * (3 - 2 * t);
-        return this.lerp(pad.platformRadius, base, smooth);
-      }
-    }
-    return base;
+    return rawTerrainRadiusAtAngle(angle, this.currentBody(), this.bodyRadiusUnits(), this.pads);
   }
 
   private terrainRadiusAtAngle(angle: number) {
-    if (this.terrainSamples.length === 0) return this.rawTerrainRadiusAtAngle(angle);
-    const normalized = this.positiveAngle(angle);
-    const samplePosition = normalized / (Math.PI * 2) * TERRAIN_SAMPLE_COUNT;
-    const index = Math.floor(samplePosition) % TERRAIN_SAMPLE_COUNT;
-    const nextIndex = (index + 1) % TERRAIN_SAMPLE_COUNT;
-    const t = samplePosition - Math.floor(samplePosition);
-    return this.lerp(this.terrainSamples[index].radius, this.terrainSamples[nextIndex].radius, t);
+    return terrainRadiusAtAngle(angle, this.terrainSamples, () => this.rawTerrainRadiusAtAngle(angle));
   }
 
   private baseTerrainRadiusAtAngle(angle: number) {
-    const body = this.currentBody();
-    const sx = angle * this.bodyRadiusUnits() * body.terrainScale;
-    return this.bodyRadiusUnits()
-      + Math.sin(sx * 0.004) * 38 * body.terrainAmp
-      + Math.sin(sx * 0.011 + 1.8) * 22 * body.terrainAmp
-      + Math.sin(sx * 0.025 + 0.4) * 9 * body.terrainAmp
-      + Math.sin(sx * 0.057 + 2.7) * 3.5 * body.terrainAmp;
+    return baseTerrainRadiusAtAngle(angle, this.currentBody(), this.bodyRadiusUnits());
   }
 
   private padAtPoint(point: Vec2) {
@@ -2241,11 +1821,16 @@ export class Game {
   }
 
   private thrustDirection() {
-    return { x: Math.sin(this.lander.angle), y: Math.cos(this.lander.angle) };
+    return this.visualNoseDirection();
   }
 
   private forwardDirection() {
-    return { x: Math.sin(this.lander.angle), y: Math.cos(this.lander.angle) };
+    return this.visualNoseDirection();
+  }
+
+  private visualNoseDirection() {
+    const nose = this.bodyPointToWorld({ x: 0, y: -42 });
+    return normalizedDirection(this.lander, nose);
   }
 
   private currentBody() {
@@ -2277,7 +1862,7 @@ export class Game {
   }
 
   private normalAtAngle(angle: number) {
-    return { x: Math.cos(angle), y: Math.sin(angle) };
+    return normalAtAngle(angle);
   }
 
   private normalAtPoint(point: Vec2) {
@@ -2299,15 +1884,11 @@ export class Game {
   }
 
   private surfacePoint(angle: number, offset = 0) {
-    const n = this.normalAtAngle(angle);
-    const r = this.terrainRadiusAtAngle(angle) + offset;
-    return { x: n.x * r, y: n.y * r };
+    return surfacePoint(angle, this.terrainRadiusAtAngle(angle), offset);
   }
 
   private baseSurfacePoint(angle: number, offset = 0) {
-    const n = this.normalAtAngle(angle);
-    const r = this.baseTerrainRadiusAtAngle(angle) + offset;
-    return { x: n.x * r, y: n.y * r };
+    return surfacePoint(angle, this.baseTerrainRadiusAtAngle(angle), offset);
   }
 
   private surfacePenetration(point: Vec2) {
@@ -2315,7 +1896,7 @@ export class Game {
   }
 
   private surfaceDistance(a: number, b: number) {
-    return Math.abs(this.normalizeAngle(a - b)) * this.bodyRadiusUnits();
+    return surfaceDistance(a, b, this.bodyRadiusUnits());
   }
 
   private radialVelocity(point: Vec2 & { vx: number; vy: number }) {
@@ -2373,14 +1954,7 @@ export class Game {
   }
 
   private bodyPointToWorld(point: Vec2, snapshot: LanderSnapshot = this.lander) {
-    const sin = Math.sin(snapshot.angle);
-    const cos = Math.cos(snapshot.angle);
-    const screenX = point.x * cos - point.y * sin;
-    const screenY = point.x * sin + point.y * cos;
-    return {
-      x: snapshot.x + screenX,
-      y: snapshot.y - screenY,
-    };
+    return bodyPointToWorldInFrame(point, snapshot);
   }
 
   private legFootPoints(snapshot: LanderSnapshot = this.lander) {
@@ -2436,74 +2010,22 @@ export class Game {
     };
   }
 
-  private normalizeAngle(angle: number) {
-    while (angle > Math.PI) angle -= Math.PI * 2;
-    while (angle < -Math.PI) angle += Math.PI * 2;
-    return angle;
-  }
-
-  private positiveAngle(angle: number) {
-    const full = Math.PI * 2;
-    return ((angle % full) + full) % full;
-  }
-
-  private lerp(a: number, b: number, t: number) {
-    return a + (b - a) * t;
-  }
-
   private enableAudio() {
-    if (this.audioContext) {
-      void this.audioContext.resume();
-      return;
-    }
-    const AudioCtor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    this.audioContext = new AudioCtor();
-    this.masterGain = this.audioContext.createGain();
-    this.masterGain.gain.value = 0.55;
-    this.masterGain.connect(this.audioContext.destination);
-    this.engineGain = this.audioContext.createGain();
-    this.engineGain.gain.value = 0;
-    this.engineGain.connect(this.masterGain);
-    this.engineOsc = this.audioContext.createOscillator();
-    this.engineOsc.type = 'sawtooth';
-    this.engineOsc.frequency.value = 48;
-    const lowpass = this.audioContext.createBiquadFilter();
-    lowpass.type = 'lowpass';
-    lowpass.frequency.value = 190;
-    this.engineOsc.connect(lowpass);
-    lowpass.connect(this.engineGain);
-    this.engineOsc.start();
+    this.audio.enable();
     const button = document.getElementById('audio-toggle');
     if (button) button.textContent = 'AUDIO ON';
   }
 
   private updateAudio() {
-    if (!this.audioContext || !this.engineGain || !this.engineOsc) return;
-    const now = this.audioContext.currentTime;
     const throttle = (!this.destroyed && !this.landed && this.lander.fuel > 0) ? this.input.state.throttle : 0;
-    this.engineGain.gain.setTargetAtTime(throttle > 0.01 ? 0.035 + throttle * 0.16 : 0.0001, now, 0.035);
-    this.engineOsc.frequency.setTargetAtTime(38 + throttle * 72, now, 0.04);
+    this.audio.updateEngine(throttle);
   }
 
   private playBurst(frequency: number, duration: number, type: OscillatorType = 'sine', volume = 0.18) {
-    if (!this.audioContext || !this.masterGain) return;
-    const now = this.audioContext.currentTime;
-    const osc = this.audioContext.createOscillator();
-    const gain = this.audioContext.createGain();
-    osc.type = type;
-    osc.frequency.value = frequency;
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(volume, now + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-    osc.connect(gain);
-    gain.connect(this.masterGain);
-    osc.start(now);
-    osc.stop(now + duration + 0.03);
+    this.audio.playBurst(frequency, duration, type, volume);
   }
 
   private playLandingTone() {
-    this.playBurst(330, 0.12, 'sine', 0.16);
-    setTimeout(() => this.playBurst(495, 0.16, 'sine', 0.14), 110);
-    setTimeout(() => this.playBurst(660, 0.24, 'sine', 0.12), 240);
+    this.audio.playLandingTone();
   }
 }

@@ -1,9 +1,0 @@
-[workspace]
-resolver = "2"
-members = [
-    "crates/lunar-physics",
-    "crates/lunar-physics-wasm",
-]
-
-[workspace.dependencies]
-lunar-physics = { path = "crates/lunar-physics" }

@@ -3,14 +3,6 @@ node_modules/
 
 # Build output
 dist/
-pkg/
-
-# Rust / Cargo
-target/
-
-# WASM build output
-*.wasm
-!crates/**/src/**
 
 # IDE
 .vscode/
@@ -40,6 +32,8 @@ bun-debug.log*
 
 # Test coverage
 coverage/
+test-results/
+playwright-report/
 
 # Temp files
 *.tmp
