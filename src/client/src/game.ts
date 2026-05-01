@@ -881,23 +881,20 @@ export class Game {
     const altitude = this.groundClearance();
     const distanceToPad = Math.hypot(pad.x - this.lander.x, pad.y - this.lander.y);
     const speed = Math.hypot(this.lander.vx, this.lander.vy);
-    const orbitalBlend = Math.max(0, Math.min(0.55, (altitude - 260) / 900));
+    const normal = this.normalAtPoint(this.lander);
     const lookAhead = {
-      x: Math.max(-320, Math.min(320, this.lander.vx * 4.2)),
-      y: Math.max(-320, Math.min(320, this.lander.vy * 4.2)),
+      x: Math.max(-180, Math.min(180, this.lander.vx * 2.2)),
+      y: Math.max(-180, Math.min(180, this.lander.vy * 2.2)),
     };
-    const targetBlend = Math.max(0, Math.min(0.42, 1 - distanceToPad / 760));
-    const closeCenter = {
-      x: this.lerp(this.lander.x + lookAhead.x, pad.x, targetBlend),
-      y: this.lerp(this.lander.y + lookAhead.y, pad.y, targetBlend),
-    };
-
-    this.cameraTarget.x = this.lerp(closeCenter.x, 0, orbitalBlend);
-    this.cameraTarget.y = this.lerp(closeCenter.y, 0, orbitalBlend);
+    const nearSurface = 1 - Math.max(0, Math.min(1, altitude / 520));
+    const targetBlend = nearSurface * Math.max(0, Math.min(0.22, 1 - distanceToPad / 900));
+    const surfaceLift = 70 * nearSurface;
+    this.cameraTarget.x = this.lerp(this.lander.x + lookAhead.x + normal.x * surfaceLift, pad.x, targetBlend);
+    this.cameraTarget.y = this.lerp(this.lander.y + lookAhead.y + normal.y * surfaceLift, pad.y, targetBlend);
 
     const desiredSpan = this.input.state.mapView
       ? this.bodyRadiusUnits() * 2.35
-      : Math.max(520, Math.min(3600, 460 + altitude * 2.2 + distanceToPad * 0.48 + speed * 8 + this.bodyRadiusUnits() * orbitalBlend * 1.9));
+      : Math.max(440, Math.min(2400, 430 + altitude * 1.45 + speed * 5.2 + distanceToPad * targetBlend * 0.7));
     const autoZoom = Math.min(this.width, this.height) / desiredSpan;
     this.cameraTarget.zoom = Math.max(0.18, Math.min(1.55, autoZoom));
     this.cameraTarget.zoom *= 1 - Math.max(0, Math.min(0.25, this.input.state.cameraZoom * 0.02));
