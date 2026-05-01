@@ -1,15 +1,14 @@
 /**
- * Lunar3D — Client Entry Point
+ * Lunar2D - Client Entry Point
  * 
- * Loads the WASM physics engine, initializes the renderer,
- * sets up the game loop, and connects to the server.
+ * Initializes the 2D lander game loop.
  */
 
 import { Game } from './src/game';
 
 async function main() {
   const loadingStatus = document.getElementById('loading-status')!;
-  loadingStatus.textContent = 'Loading physics engine (Rust/WASM)...';
+  loadingStatus.textContent = 'Preparing Lunar2D...';
 
   try {
     const game = new Game();

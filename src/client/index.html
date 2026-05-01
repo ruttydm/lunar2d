@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Lunar3D — Moon Landing MMO</title>
+  <title>Lunar2D — Moon Landing</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { 
@@ -40,7 +40,7 @@
     /* Minimap - top right */
     #hud-minimap {
       position: absolute; top: 10px; right: 10px;
-      width: 150px; height: 150px;
+      width: 220px; height: 148px;
     }
     #minimap-canvas {
       width: 100%; height: 100%;
@@ -199,7 +199,7 @@
 
     #top-actions {
       position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-      display: flex; gap: 8px;
+      display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
     }
     .hud-button {
       min-width: 88px;
@@ -214,6 +214,18 @@
       pointer-events: auto;
     }
     .hud-button:hover { background: rgba(132,255,211,0.18); }
+    .hud-select {
+      max-width: 190px;
+      background: rgba(2, 8, 12, 0.88);
+      border: 1px solid rgba(132, 255, 211, 0.34);
+      color: #dffdf4;
+      border-radius: 6px;
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+      pointer-events: auto;
+    }
 
     #controls-panel {
       position: absolute; top: 54px; left: 50%; transform: translateX(-50%);
@@ -309,7 +321,7 @@
 
     @media (max-width: 720px) {
       .hud-panel { font-size: 11px; padding: 7px 9px; }
-      #hud-minimap { width: 118px; height: 118px; }
+      #hud-minimap { width: 154px; height: 112px; }
       #hud-throttle, #hud-fuel { height: 160px; }
       #hud-telemetry { bottom: 86px; }
       #hud-hp { bottom: 86px; width: 108px; }
@@ -321,10 +333,16 @@
         top: 66px;
         left: 10px;
         transform: none;
+        max-width: calc(100vw - 20px);
+        justify-content: flex-start;
       }
       .hud-button {
         min-width: 84px;
         padding-inline: 8px;
+      }
+      .hud-select {
+        max-width: 142px;
+        padding-inline: 7px;
       }
     }
 
@@ -338,8 +356,8 @@
 <body>
   <!-- Loading Screen -->
   <div id="loading">
-    <h1>LUNAR 3D</h1>
-    <div class="subtitle">Multiplayer Moon Landing MMO</div>
+    <h1>LUNAR 2D</h1>
+    <div class="subtitle">Fast, readable lunar landing</div>
     <div class="status" id="loading-status">Initializing physics engine...</div>
   </div>
 
@@ -355,6 +373,7 @@
     </div>
 
     <div id="top-actions">
+      <select class="hud-select" id="body-select" aria-label="Celestial body"></select>
       <button class="hud-button" id="controls-toggle">CONTROLS</button>
       <button class="hud-button" id="audio-toggle">AUDIO OFF</button>
     </div>
@@ -372,8 +391,8 @@
       <div>
         <h3>Attitude</h3>
         <div class="control-list">
-          <div><span>Pitch</span><kbd>W / S</kbd></div>
-          <div><span>Yaw</span><kbd>A / D</kbd></div>
+          <div><span>Pitch trim</span><kbd>W / S</kbd></div>
+          <div><span>Rotate</span><kbd>A / D</kbd></div>
           <div><span>Roll</span><kbd>Q / E</kbd></div>
           <div><span>SAS cycle</span><kbd>T</kbd></div>
         </div>
@@ -400,7 +419,7 @@
 
     <div id="touch-controls">
       <div id="touch-throttle" aria-label="Throttle"></div>
-      <div id="touch-stick-flight" class="touch-stick" data-label="PITCH / YAW">
+      <div id="touch-stick-flight" class="touch-stick" data-label="ROTATE">
         <div class="touch-stick-knob"></div>
       </div>
       <div id="touch-stick-camera" class="touch-stick" data-label="CAMERA">
@@ -422,7 +441,7 @@
     
     <!-- Minimap -->
     <div id="hud-minimap" class="hud-panel" style="padding:4px;">
-      <canvas id="minimap-canvas" width="150" height="150"></canvas>
+      <canvas id="minimap-canvas" width="220" height="148"></canvas>
     </div>
     
     <!-- Throttle Bar -->
