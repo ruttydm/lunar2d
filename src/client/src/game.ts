@@ -79,10 +79,10 @@ const LEG_DAMPING = 11;
 const LEG_FRICTION = 2.2;
 const LEG_TORQUE_RESPONSE = 0.0045;
 const LEG_POINTS = [
-  { x: -15, y: -16 },
-  { x: 15, y: -16 },
+  { x: -30, y: 30 },
+  { x: 30, y: 30 },
 ];
-const HULL_BOTTOM = -11;
+const HULL_BOTTOM = 22;
 
 const LANDERS: LanderStats[] = [
   { name: 'Scout', mass: 650, maxTwr: 2.9, fuel: 75, hp: 70, rotation: 3.1, color: '#56b6ff' },
@@ -416,11 +416,11 @@ export class Game {
     const body = this.currentBody();
     const names = body.padNames;
     this.pads = [
-      { id: 0, name: names[0] ?? 'Alpha', x: -1650, y: this.rawTerrainHeight(-1650), radius: 75 },
-      { id: 1, name: names[1] ?? 'Beta', x: -460, y: this.rawTerrainHeight(-460), radius: 54 },
-      { id: 2, name: names[2] ?? 'Gamma', x: 820, y: this.rawTerrainHeight(820), radius: 46 },
-      { id: 3, name: names[3] ?? 'Delta', x: 1980, y: this.rawTerrainHeight(1980), radius: 35 },
-      { id: 4, name: names[4] ?? 'Epsilon', x: 3180, y: this.rawTerrainHeight(3180), radius: 42 },
+      { id: 0, name: names[0] ?? 'Alpha', x: -1650, y: this.rawTerrainHeight(-1650), radius: 220 },
+      { id: 1, name: names[1] ?? 'Beta', x: -460, y: this.rawTerrainHeight(-460), radius: 180 },
+      { id: 2, name: names[2] ?? 'Gamma', x: 820, y: this.rawTerrainHeight(820), radius: 160 },
+      { id: 3, name: names[3] ?? 'Delta', x: 1980, y: this.rawTerrainHeight(1980), radius: 145 },
+      { id: 4, name: names[4] ?? 'Epsilon', x: 3180, y: this.rawTerrainHeight(3180), radius: 155 },
     ];
   }
 
@@ -496,8 +496,7 @@ export class Game {
   private updateLander(dt: number) {
     const stats = LANDERS[this.selectedLander];
     const s = this.input.state;
-    const ground = this.terrainHeight(this.lander.x);
-    const altitude = this.lander.y - ground;
+    const altitude = this.groundClearance();
 
     let angularInput = s.yaw + s.roll - s.pitch * 0.35;
     if (s.brakeAssist) this.applyBrakeAssist(dt);
@@ -597,11 +596,11 @@ export class Game {
     const impactSpeed = this.toMetersPerSecond(maxImpactSpeed);
     const tilt = Math.abs(this.normalizeAngle(this.lander.angle));
     const bothFeetSupported = footContacts.length === LEG_POINTS.length;
-    const soft = bothFeetSupported && verticalSpeed < 3.0 && horizontalSpeed < 2.4 && tilt < 0.2;
+    const soft = bothFeetSupported && impactSpeed < 4.2 && horizontalSpeed < 3.2 && tilt < 0.28;
 
-    if (impactSpeed > 2.8 || horizontalSpeed > 3.4 || tilt > 0.32 || hardContact) {
+    if (impactSpeed > 4.8 || horizontalSpeed > 4.2 || tilt > 0.45 || hardContact) {
       const massFactor = Math.sqrt(stats.mass / 1000);
-      const damage = (impactSpeed * 12 + horizontalSpeed * 5 + tilt * 38 + (hardContact ? 35 : 0)) * massFactor;
+      const damage = (Math.max(0, impactSpeed - 3.6) * 13 + Math.max(0, horizontalSpeed - 2.8) * 7 + Math.max(0, tilt - 0.25) * 42 + (hardContact ? 35 : 0)) * massFactor;
       this.lander.hp = Math.max(0, this.lander.hp - damage);
       hardContact = hardContact || this.lander.hp <= 0;
       this.spawnImpactFx(this.lander.x, this.terrainHeight(this.lander.x), '#ffcf5a', Math.min(18, 4 + Math.round(damage / 8)));
@@ -616,14 +615,15 @@ export class Game {
       this.streak++;
       this.lander.vx = 0;
       this.lander.vy = 0;
+      this.lander.angle = 0;
       this.lander.angularVelocity = 0;
       const precision = Math.abs(this.lander.x - pad.x);
       const precisionM = this.toMeters(precision);
-      const earned = Math.round(180 + (1 - precision / pad.radius) * 180 + (1 - verticalSpeed / 3) * 120 + this.lander.fuel * 2 + this.streak * 25);
+      const earned = Math.round(180 + (1 - precision / pad.radius) * 180 + (1 - impactSpeed / 4.2) * 120 + this.lander.fuel * 2 + this.streak * 25);
       this.score += Math.max(80, earned);
       this.spawnImpactFx(this.lander.x, this.terrainHeight(this.lander.x), '#84ffd3');
       this.playLandingTone();
-      this.showLandingScreen(Math.max(80, earned), pad.name, precisionM, verticalSpeed);
+      this.showLandingScreen(Math.max(80, earned), pad.name, precisionM, impactSpeed);
       return;
     }
 
@@ -677,7 +677,7 @@ export class Game {
 
   private updateCamera(dt: number) {
     const pad = this.targetPad();
-    const altitude = this.lander.y - this.terrainHeight(this.lander.x);
+    const altitude = this.groundClearance();
     const distanceToPad = Math.abs(pad.x - this.lander.x);
     const lookAhead = Math.max(-180, Math.min(180, this.lander.vx * 4));
     const targetBlend = Math.max(0, Math.min(0.35, 1 - distanceToPad / 900));
@@ -1031,8 +1031,7 @@ export class Game {
   private updateHUD() {
     const stats = LANDERS[this.selectedLander];
     const body = this.currentBody();
-    const ground = this.terrainHeight(this.lander.x);
-    const altitude = this.toMeters(Math.max(0, this.lander.y - ground + HULL_BOTTOM));
+    const altitude = this.toMeters(this.groundClearance());
     const speed = this.toMetersPerSecond(Math.hypot(this.lander.vx, this.lander.vy));
     const fuelPct = Math.max(0, Math.min(1, this.lander.fuel / stats.fuel));
     const hpPct = Math.max(0, Math.min(1, this.lander.hp / stats.hp));
@@ -1343,12 +1342,22 @@ export class Game {
     return value * WORLD_METERS_PER_UNIT;
   }
 
+  private groundClearance() {
+    const footClearance = this.legFootPoints()
+      .map((foot) => foot.y - this.terrainHeight(foot.x));
+    const hull = this.bodyPointToWorld({ x: 0, y: HULL_BOTTOM });
+    footClearance.push(hull.y - this.terrainHeight(hull.x));
+    return Math.max(0, Math.min(...footClearance));
+  }
+
   private bodyPointToWorld(point: Vec2) {
     const sin = Math.sin(this.lander.angle);
     const cos = Math.cos(this.lander.angle);
+    const screenX = point.x * cos - point.y * sin;
+    const screenY = point.x * sin + point.y * cos;
     return {
-      x: this.lander.x + point.x * cos - point.y * sin,
-      y: this.lander.y + point.x * sin + point.y * cos,
+      x: this.lander.x + screenX,
+      y: this.lander.y - screenY,
     };
   }
 
