@@ -741,14 +741,18 @@ export class Game {
     const brakeAlignment = s.brakeAssist ? this.retrogradeAlignment() : 0;
     const brakeThrottle = brakeAlignment > 0.58 ? 0.25 + brakeAlignment * 0.65 : 0;
     const throttle = s.brakeAssist ? Math.max(s.throttle, brakeThrottle) : s.throttle;
+    let brakingBurnSpeedLimit: number | null = null;
     if (throttle > 0.01 && this.lander.fuel > 0) {
       const boost = s.boost ? 1.35 : 1;
       const thrust = this.lunarRatedEngineAccel() * stats.maxTwr * throttle * boost;
       const dir = this.thrustDirection();
+      if (this.isBrakingBurn(dir, speedBeforeThrust)) {
+        brakingBurnSpeedLimit = speedBeforeThrust;
+      }
       this.lander.vx += dir.x * thrust * dt;
       this.lander.vy += dir.y * thrust * dt;
-      if (s.brakeAssist && speedBeforeThrust > 0.5) {
-        this.preventBrakeAssistSpeedup(speedBeforeThrust);
+      if (brakingBurnSpeedLimit !== null) {
+        this.preventBrakingBurnSpeedup(brakingBurnSpeedLimit);
       }
       this.lander.fuel = Math.max(0, this.lander.fuel - throttle * boost * stats.fuel / 58 * dt);
       this.emitExhaust(dt, throttle);
@@ -766,6 +770,9 @@ export class Game {
     const gravityNormal = this.normalAtPoint(this.lander);
     this.lander.vx -= gravityNormal.x * this.gravity() * dt;
     this.lander.vy -= gravityNormal.y * this.gravity() * dt;
+    if (brakingBurnSpeedLimit !== null) {
+      this.preventBrakingBurnSpeedup(brakingBurnSpeedLimit);
+    }
     this.lander.x += this.lander.vx * dt;
     this.lander.y += this.lander.vy * dt;
 
@@ -796,7 +803,13 @@ export class Game {
     return Math.max(0, -(thrust.x * this.lander.vx + thrust.y * this.lander.vy) / speed);
   }
 
-  private preventBrakeAssistSpeedup(previousSpeed: number) {
+  private isBrakingBurn(direction: Vec2, speed: number) {
+    if (speed < 0.5) return false;
+    const alongVelocity = (direction.x * this.lander.vx + direction.y * this.lander.vy) / speed;
+    return alongVelocity < -0.12;
+  }
+
+  private preventBrakingBurnSpeedup(previousSpeed: number) {
     const speed = Math.hypot(this.lander.vx, this.lander.vy);
     if (speed <= previousSpeed) return;
     const scale = previousSpeed / speed;
