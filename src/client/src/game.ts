@@ -111,7 +111,8 @@ const PROJECTILE_RADIUS = 3.2;
 const PROJECTILE_ARM_TIME = 0.32;
 const PROJECTILE_LIFE_SECONDS = 180;
 const PROJECTILE_COOLDOWN_SECONDS = 0.9;
-const PROJECTILE_MUZZLE_SPEED = 260;
+const PROJECTILE_MUZZLE_SPEED = 82;
+const PROJECTILE_ESCAPE_SPEED_FRACTION = 0.72;
 const PROJECTILE_DAMAGE = 72;
 const VIBE_JAM_PORTAL_URL = 'https://vibejam.cc/portal/2026';
 const MULTIPLAYER_PROTOCOL = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -736,13 +737,19 @@ export class Game {
     this.lander.angularVelocity *= Math.pow(0.18, dt);
     this.lander.angle = this.normalizeAngle(this.lander.angle + this.lander.angularVelocity * dt);
 
-    const throttle = s.brakeAssist ? Math.max(s.throttle, 0.88) : s.throttle;
+    const speedBeforeThrust = Math.hypot(this.lander.vx, this.lander.vy);
+    const brakeAlignment = s.brakeAssist ? this.retrogradeAlignment() : 0;
+    const brakeThrottle = brakeAlignment > 0.58 ? 0.25 + brakeAlignment * 0.65 : 0;
+    const throttle = s.brakeAssist ? Math.max(s.throttle, brakeThrottle) : s.throttle;
     if (throttle > 0.01 && this.lander.fuel > 0) {
       const boost = s.boost ? 1.35 : 1;
       const thrust = this.lunarRatedEngineAccel() * stats.maxTwr * throttle * boost;
       const dir = this.thrustDirection();
       this.lander.vx += dir.x * thrust * dt;
       this.lander.vy += dir.y * thrust * dt;
+      if (s.brakeAssist && speedBeforeThrust > 0.5) {
+        this.preventBrakeAssistSpeedup(speedBeforeThrust);
+      }
       this.lander.fuel = Math.max(0, this.lander.fuel - throttle * boost * stats.fuel / 58 * dt);
       this.emitExhaust(dt, throttle);
     }
@@ -780,6 +787,21 @@ export class Game {
     const error = this.normalizeAngle(desired - this.lander.angle);
     this.lander.angle = this.normalizeAngle(this.lander.angle + error * Math.min(1, dt * 4.5));
     this.lander.angularVelocity += error * 6.0 * dt;
+  }
+
+  private retrogradeAlignment() {
+    const speed = Math.hypot(this.lander.vx, this.lander.vy);
+    if (speed < 0.5) return 0;
+    const thrust = this.thrustDirection();
+    return Math.max(0, -(thrust.x * this.lander.vx + thrust.y * this.lander.vy) / speed);
+  }
+
+  private preventBrakeAssistSpeedup(previousSpeed: number) {
+    const speed = Math.hypot(this.lander.vx, this.lander.vy);
+    if (speed <= previousSpeed) return;
+    const scale = previousSpeed / speed;
+    this.lander.vx *= scale;
+    this.lander.vy *= scale;
   }
 
   private checkSurfaceContact(dt: number) {
@@ -889,17 +911,30 @@ export class Game {
   private fireProjectile() {
     const dir = this.forwardDirection();
     const muzzle = this.bodyPointToWorld({ x: 0, y: -42 });
+    const velocity = this.cappedProjectileVelocity(muzzle, {
+      x: this.lander.vx + dir.x * PROJECTILE_MUZZLE_SPEED,
+      y: this.lander.vy + dir.y * PROJECTILE_MUZZLE_SPEED,
+    });
     this.projectiles.push({
       x: muzzle.x + dir.x * 12,
       y: muzzle.y + dir.y * 12,
-      vx: this.lander.vx + dir.x * PROJECTILE_MUZZLE_SPEED,
-      vy: this.lander.vy + dir.y * PROJECTILE_MUZZLE_SPEED,
+      vx: velocity.x,
+      vy: velocity.y,
       life: PROJECTILE_LIFE_SECONDS,
       age: 0,
       armed: false,
     });
     this.fireCooldown = PROJECTILE_COOLDOWN_SECONDS;
     this.playBurst(420, 0.08, 'square', 0.12);
+  }
+
+  private cappedProjectileVelocity(origin: Vec2, velocity: Vec2) {
+    const localEscapeSpeed = Math.sqrt(2 * this.gravity() * Math.max(1, Math.hypot(origin.x, origin.y)));
+    const maxSpeed = localEscapeSpeed * PROJECTILE_ESCAPE_SPEED_FRACTION;
+    const speed = Math.hypot(velocity.x, velocity.y);
+    if (speed <= maxSpeed) return velocity;
+    const scale = maxSpeed / speed;
+    return { x: velocity.x * scale, y: velocity.y * scale };
   }
 
   private updateProjectiles(dt: number) {
