@@ -15,6 +15,35 @@ interface Peer {
 
 type ServerWebSocket = Parameters<Parameters<typeof Bun.serve>[0]['websocket']['open']>[0];
 
+const DIST_DIR = new URL('../../dist/', import.meta.url);
+const INDEX_FILE = new URL('./index.html', DIST_DIR);
+
+async function serveClient(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const pathname = url.pathname === '/' ? '/index.html' : url.pathname;
+
+  if (pathname.includes('..')) {
+    return new Response('Bad request', { status: 400 });
+  }
+
+  const file = Bun.file(new URL(`.${pathname}`, DIST_DIR));
+  if (await file.exists()) {
+    return new Response(file);
+  }
+
+  if (!pathname.startsWith('/assets/')) {
+    const index = Bun.file(INDEX_FILE);
+    if (await index.exists()) {
+      return new Response(index);
+    }
+  }
+
+  return Response.json({
+    name: 'Lunar2D Relay',
+    status: 'client-build-not-found',
+  }, { status: 404 });
+}
+
 class RelayServer {
   private peers = new Map<number, Peer>();
   private nextId = 1;
@@ -22,17 +51,17 @@ class RelayServer {
   start(port = 3001) {
     Bun.serve({
       port,
-      fetch: (req, server) => {
-        const upgraded = server.upgrade(req, {
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-          },
-        });
-        if (upgraded) return undefined;
-        return Response.json({
-          name: 'Lunar2D Relay',
-          peers: this.peers.size,
-        });
+      fetch: async (req, server) => {
+        if (req.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+          const upgraded = server.upgrade(req, {
+            headers: {
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+          if (upgraded) return undefined;
+        }
+
+        return serveClient(req);
       },
       websocket: {
         open: (ws) => this.open(ws),

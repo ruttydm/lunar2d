@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Lunar2D">
+  <rect width="64" height="64" rx="14" fill="#03080d"/>
+  <circle cx="32" cy="34" r="22" fill="#d8d4c8"/>
+  <path d="M12 39c6-3 11-3 16 0s10 3 16 0 10-3 14 0v13H12z" fill="#8f8a7c"/>
+  <circle cx="22" cy="25" r="4" fill="#777266" opacity=".55"/>
+  <circle cx="40" cy="21" r="6" fill="#777266" opacity=".42"/>
+  <circle cx="46" cy="38" r="3" fill="#777266" opacity=".48"/>
+  <path d="M30 10l6 14h-4l-2 9-2-9h-4z" fill="#84ffd3"/>
+  <path d="M25 47h14" stroke="#ffcf5a" stroke-width="4" stroke-linecap="round"/>
+</svg>

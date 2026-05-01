@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-label="Lunar2D Moon Landing">
+  <defs>
+    <radialGradient id="moonGlow" cx="58%" cy="46%" r="52%">
+      <stop offset="0" stop-color="#f6f2e8"/>
+      <stop offset=".52" stop-color="#bdb7a8"/>
+      <stop offset="1" stop-color="#5c5a52"/>
+    </radialGradient>
+    <linearGradient id="space" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#02060b"/>
+      <stop offset=".58" stop-color="#08131c"/>
+      <stop offset="1" stop-color="#020408"/>
+    </linearGradient>
+    <linearGradient id="hud" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#84ffd3"/>
+      <stop offset="1" stop-color="#ffcf5a"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#space)"/>
+  <g opacity=".75" fill="#d9f7ff">
+    <circle cx="114" cy="95" r="2"/>
+    <circle cx="248" cy="148" r="1.6"/>
+    <circle cx="444" cy="74" r="2.5"/>
+    <circle cx="1012" cy="116" r="1.8"/>
+    <circle cx="1092" cy="264" r="2.2"/>
+    <circle cx="728" cy="86" r="1.4"/>
+    <circle cx="885" cy="44" r="2"/>
+  </g>
+  <circle cx="838" cy="382" r="320" fill="url(#moonGlow)"/>
+  <path d="M540 436c82-39 156-43 229-12 71 31 141 32 211 2 70-29 133-31 190-5v209H540z" fill="#34332f" opacity=".62"/>
+  <g fill="#2d2c28" opacity=".5">
+    <ellipse cx="728" cy="256" rx="54" ry="18" transform="rotate(-18 728 256)"/>
+    <ellipse cx="936" cy="302" rx="88" ry="28" transform="rotate(12 936 302)"/>
+    <ellipse cx="815" cy="468" rx="62" ry="21" transform="rotate(-8 815 468)"/>
+    <ellipse cx="1040" cy="454" rx="42" ry="15" transform="rotate(18 1040 454)"/>
+  </g>
+  <g transform="translate(742 205) rotate(-16)">
+    <path d="M0-68l33 76H12L0 58-12 8h-21z" fill="#eef9ff"/>
+    <path d="M-18 24h36l-5 34h-26z" fill="#84ffd3"/>
+    <path d="M-26 58h52" stroke="#ffcf5a" stroke-width="10" stroke-linecap="round"/>
+    <path d="M-12 67c6 28 18 48 12 80-6-32 6-52 12-80z" fill="#ff7b4a" opacity=".82"/>
+  </g>
+  <g transform="translate(76 116)">
+    <text x="0" y="0" fill="#ffffff" font-family="Helvetica" font-size="92" font-weight="900">Lunar2D</text>
+    <text x="4" y="74" fill="#dffdf4" font-family="Helvetica" font-size="34" font-weight="700">Moon landing, orbital physics, live multiplayer.</text>
+    <rect x="4" y="116" width="540" height="4" rx="2" fill="url(#hud)"/>
+    <text x="4" y="176" fill="#84ffd3" font-family="Menlo" font-size="27" font-weight="700">LAND SOFT. SAVE FUEL. BEAT RIVALS.</text>
+  </g>
+</svg>

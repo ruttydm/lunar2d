@@ -29,3 +29,15 @@ bun run test:rust
 
 ## Run all tests
 bun run test
+```
+
+## Docker
+
+Build and run the combined client + multiplayer server image:
+
+```sh
+docker build -t lunar3d .
+docker run --rm -p 3001:3001 lunar3d
+```
+
+Open http://localhost:3001. The client and WebSocket multiplayer server use the same port in the container.

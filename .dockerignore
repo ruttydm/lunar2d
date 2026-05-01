@@ -1,0 +1,13 @@
+.git
+.cache
+.DS_Store
+.env
+.env.*
+.playwright-mcp
+.vite
+coverage
+dist
+node_modules
+pkg
+target
+*.log
