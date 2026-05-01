@@ -265,11 +265,11 @@ export class InputManager {
     this.state.boost = false;
     this.state.brakeAssist = false;
     
-    // Throttle (Shift = up, Ctrl = down, persists)
+    // Throttle (Shift = up, Ctrl/C = down, persists)
     if (k.has('ShiftLeft') || k.has('ShiftRight')) {
       this.state.throttle = Math.min(1.0, this.state.throttle + 0.02);
     }
-    if (k.has('ControlLeft') || k.has('ControlRight')) {
+    if (k.has('ControlLeft') || k.has('ControlRight') || k.has('KeyC')) {
       this.state.throttle = Math.max(0.0, this.state.throttle - 0.02);
     }
 

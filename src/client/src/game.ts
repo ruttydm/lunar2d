@@ -736,7 +736,7 @@ export class Game {
     this.lander.angularVelocity *= Math.pow(0.18, dt);
     this.lander.angle = this.normalizeAngle(this.lander.angle + this.lander.angularVelocity * dt);
 
-    const throttle = s.brakeAssist ? Math.max(s.throttle, 0.58) : s.throttle;
+    const throttle = s.brakeAssist ? Math.max(s.throttle, 0.88) : s.throttle;
     if (throttle > 0.01 && this.lander.fuel > 0) {
       const boost = s.boost ? 1.35 : 1;
       const thrust = this.lunarRatedEngineAccel() * stats.maxTwr * throttle * boost;
@@ -748,8 +748,11 @@ export class Game {
     }
 
     if (s.rcsMode && this.lander.fuel > 0) {
-      this.lander.vx += s.translateX * RCS_ACCEL * dt;
-      this.lander.vy += -s.translateZ * RCS_ACCEL * dt + s.translateY * RCS_VERTICAL_ACCEL * dt;
+      const frame = this.localFrame(this.lander);
+      const radialAccel = -s.translateZ * RCS_ACCEL + s.translateY * RCS_VERTICAL_ACCEL;
+      const tangentialAccel = s.translateX * RCS_ACCEL;
+      this.lander.vx += (frame.tangent.x * tangentialAccel + frame.normal.x * radialAccel) * dt;
+      this.lander.vy += (frame.tangent.y * tangentialAccel + frame.normal.y * radialAccel) * dt;
       this.lander.fuel = Math.max(0, this.lander.fuel - (Math.abs(s.translateX) + Math.abs(s.translateZ) + Math.abs(s.translateY)) * 0.12 * dt);
     }
 
@@ -775,7 +778,8 @@ export class Game {
     if (speed < 0.5) return;
     const desired = Math.atan2(-this.lander.vx / speed, -this.lander.vy / speed);
     const error = this.normalizeAngle(desired - this.lander.angle);
-    this.lander.angularVelocity += error * 4.0 * dt;
+    this.lander.angle = this.normalizeAngle(this.lander.angle + error * Math.min(1, dt * 4.5));
+    this.lander.angularVelocity += error * 6.0 * dt;
   }
 
   private checkSurfaceContact(dt: number) {
@@ -1815,6 +1819,14 @@ export class Game {
   private normalAtPoint(point: Vec2) {
     const length = Math.hypot(point.x, point.y) || 1;
     return { x: point.x / length, y: point.y / length };
+  }
+
+  private localFrame(point: Vec2) {
+    const normal = this.normalAtPoint(point);
+    return {
+      normal,
+      tangent: { x: -normal.y, y: normal.x },
+    };
   }
 
   private localUpAngleAt(angle: number) {
