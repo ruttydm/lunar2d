@@ -100,10 +100,20 @@ const LANDER_COLLISION_RADIUS = 25;
 const PROJECTILE_RADIUS = 3.2;
 const PROJECTILE_ARM_TIME = 0.32;
 const PROJECTILE_LIFE_SECONDS = 180;
+const PROJECTILE_COOLDOWN_SECONDS = 0.9;
 const PROJECTILE_DAMAGE = 72;
 const MULTIPLAYER_PROTOCOL = location.protocol === 'https:' ? 'wss' : 'ws';
 const MULTIPLAYER_PORT = location.port === '3000' ? '3001' : location.port;
 const MULTIPLAYER_URL = `${MULTIPLAYER_PROTOCOL}://${location.hostname}${MULTIPLAYER_PORT ? `:${MULTIPLAYER_PORT}` : ''}`;
+const PILOT_ADJECTIVES = ['Nova', 'Apex', 'Vector', 'Comet', 'Ranger', 'Echo', 'Zenith', 'Atlas'];
+const PILOT_NOUNS = ['Falcon', 'Drift', 'Surveyor', 'Beacon', 'Nomad', 'Arrow', 'Orbit', 'Strider'];
+
+function generatePilotName() {
+  const adjective = PILOT_ADJECTIVES[Math.floor(Math.random() * PILOT_ADJECTIVES.length)];
+  const noun = PILOT_NOUNS[Math.floor(Math.random() * PILOT_NOUNS.length)];
+  const number = Math.floor(Math.random() * 90 + 10);
+  return `${adjective} ${noun}-${number}`;
+}
 const LEG_POINTS = [
   { x: -30, y: 30 },
   { x: 30, y: 30 },
@@ -323,8 +333,8 @@ export class Game {
 
   private width = 1280;
   private height = 720;
-  private camera = { x: 0, y: 280, zoom: 0.9 };
-  private cameraTarget = { x: 0, y: 280, zoom: 0.9 };
+  private camera = { x: 0, y: 280, zoom: 0.9, rotation: 0 };
+  private cameraTarget = { x: 0, y: 280, zoom: 0.9, rotation: 0 };
 
   private pads: Pad[] = [];
   private targetPadIndex = 0;
@@ -360,7 +370,7 @@ export class Game {
   private lastWarningAt = 0;
   private multiplayerSocket: WebSocket | null = null;
   private multiplayerId = 0;
-  private multiplayerName = `Pilot ${Math.floor(Math.random() * 900 + 100)}`;
+  private multiplayerName = generatePilotName();
   private multiplayerSendTimer = 0;
   private remotePlayers: Map<number, RemotePlayer> = new Map();
 
@@ -528,11 +538,11 @@ export class Game {
     const padAngles = [-2.45, -1.25, 0.15, 1.35, 2.58];
     this.pads = [];
     this.pads = [
-      { id: 0, name: names[0] ?? 'Alpha', x: 0, y: 0, radius: 145 },
-      { id: 1, name: names[1] ?? 'Beta', x: 0, y: 0, radius: 130 },
-      { id: 2, name: names[2] ?? 'Gamma', x: 0, y: 0, radius: 120 },
-      { id: 3, name: names[3] ?? 'Delta', x: 0, y: 0, radius: 112 },
-      { id: 4, name: names[4] ?? 'Epsilon', x: 0, y: 0, radius: 118 },
+      { id: 0, name: names[0] ?? 'Alpha', x: 0, y: 0, radius: 320 },
+      { id: 1, name: names[1] ?? 'Beta', x: 0, y: 0, radius: 280 },
+      { id: 2, name: names[2] ?? 'Gamma', x: 0, y: 0, radius: 250 },
+      { id: 3, name: names[3] ?? 'Delta', x: 0, y: 0, radius: 230 },
+      { id: 4, name: names[4] ?? 'Epsilon', x: 0, y: 0, radius: 240 },
     ].map((pad, index) => ({ ...pad, ...this.baseSurfacePoint(padAngles[index] ?? 0) }));
   }
 
@@ -793,7 +803,7 @@ export class Game {
       age: 0,
       armed: false,
     });
-    this.fireCooldown = 0.22;
+    this.fireCooldown = PROJECTILE_COOLDOWN_SECONDS;
     this.playBurst(420, 0.08, 'square', 0.12);
   }
 
@@ -886,16 +896,18 @@ export class Game {
     this.cameraTarget.y = this.lerp(closeCenter.y, 0, orbitalBlend);
 
     const desiredSpan = this.input.state.mapView
-      ? this.bodyRadiusUnits() * 3.25
+      ? this.bodyRadiusUnits() * 2.35
       : Math.max(520, Math.min(3600, 460 + altitude * 2.2 + distanceToPad * 0.48 + speed * 8 + this.bodyRadiusUnits() * orbitalBlend * 1.9));
     const autoZoom = Math.min(this.width, this.height) / desiredSpan;
     this.cameraTarget.zoom = Math.max(0.18, Math.min(1.55, autoZoom));
     this.cameraTarget.zoom *= 1 - Math.max(0, Math.min(0.25, this.input.state.cameraZoom * 0.02));
+    this.cameraTarget.rotation = this.input.state.mapView ? 0 : Math.PI / 2 - this.angleOf(this.lander);
 
     const t = 1 - Math.pow(0.02, dt);
     this.camera.x = this.lerp(this.camera.x, this.cameraTarget.x, t);
     this.camera.y = this.lerp(this.camera.y, this.cameraTarget.y, t);
     this.camera.zoom = this.lerp(this.camera.zoom, this.cameraTarget.zoom, t);
+    this.camera.rotation = this.normalizeAngle(this.camera.rotation + this.normalizeAngle(this.cameraTarget.rotation - this.camera.rotation) * t);
     this.input.state.cameraZoom = 0;
   }
 
@@ -1017,7 +1029,7 @@ export class Game {
       const ry = rx * 0.28;
       ctx.save();
       ctx.translate(p.x, p.y);
-      ctx.rotate(-angle);
+      ctx.rotate(-angle + this.camera.rotation);
       ctx.globalAlpha = 0.22;
       ctx.fillStyle = '#30302d';
       ctx.beginPath();
@@ -1067,7 +1079,7 @@ export class Game {
       const half = pad.radius * this.camera.zoom * 0.52;
       ctx.save();
       ctx.translate(p.x, p.y);
-      ctx.rotate(-angle + Math.PI / 2);
+      ctx.rotate(-angle + Math.PI / 2 + this.camera.rotation);
       ctx.globalAlpha = isTarget ? 0.28 : 0.12;
       ctx.fillStyle = isTarget ? '#ffcf5a' : '#84ffd3';
       ctx.beginPath();
@@ -1076,7 +1088,7 @@ export class Game {
       ctx.restore();
       ctx.save();
       ctx.translate(p.x, p.y);
-      ctx.rotate(-angle + Math.PI / 2);
+      ctx.rotate(-angle + Math.PI / 2 + this.camera.rotation);
       ctx.strokeStyle = pad === this.targetPad() ? '#ffcf5a' : '#84ffd3';
       ctx.fillStyle = isTarget ? 'rgba(255,207,90,0.22)' : 'rgba(132,255,211,0.16)';
       ctx.lineWidth = pad === this.targetPad() ? 3 : 2;
@@ -1131,7 +1143,7 @@ export class Game {
     ctx.globalAlpha = Math.max(0.12, Math.min(0.45, 1 - altitude / 420));
     ctx.fillStyle = '#24231f';
     ctx.translate(shadow.x, shadow.y);
-    ctx.rotate(-this.angleOf(this.lander) + Math.PI / 2);
+    ctx.rotate(-this.angleOf(this.lander) + Math.PI / 2 + this.camera.rotation);
     ctx.beginPath();
     ctx.ellipse(normal.x * 4, normal.y * 4, 36 * this.camera.zoom, 8 * this.camera.zoom, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -1139,7 +1151,7 @@ export class Game {
 
     ctx.save();
     ctx.translate(p.x, p.y);
-    ctx.rotate(this.lander.angle);
+    ctx.rotate(this.lander.angle + this.camera.rotation);
     ctx.scale(scale, scale);
 
     const throttle = this.input.state.throttle;
@@ -1253,7 +1265,7 @@ export class Game {
       const p = this.worldToScreen(remote);
       ctx.save();
       ctx.translate(p.x, p.y);
-      ctx.rotate(remote.angle);
+      ctx.rotate(remote.angle + this.camera.rotation);
       ctx.strokeStyle = '#ffcf5a';
       ctx.fillStyle = 'rgba(255,207,90,0.32)';
       ctx.lineWidth = 2;
@@ -1642,7 +1654,7 @@ export class Game {
   }
 
   private bodyRadiusUnits() {
-    return this.currentBody().gameRadiusM / 32;
+    return this.currentBody().gameRadiusM / 10;
   }
 
   private lunarRatedEngineAccel() {
@@ -1765,9 +1777,15 @@ export class Game {
   }
 
   private worldToScreen(point: Vec2) {
+    const dx = point.x - this.camera.x;
+    const dy = point.y - this.camera.y;
+    const cos = Math.cos(this.camera.rotation);
+    const sin = Math.sin(this.camera.rotation);
+    const rx = dx * cos - dy * sin;
+    const ry = dx * sin + dy * cos;
     return {
-      x: (point.x - this.camera.x) * this.camera.zoom + this.width / 2,
-      y: this.height * 0.62 - (point.y - this.camera.y) * this.camera.zoom,
+      x: rx * this.camera.zoom + this.width / 2,
+      y: this.height * 0.62 - ry * this.camera.zoom,
     };
   }
 
