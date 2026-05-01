@@ -17,6 +17,16 @@ interface Pad {
   radius: number;
 }
 
+interface Portal {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  radius: number;
+  color: string;
+  url: string;
+}
+
 interface Projectile {
   x: number;
   y: number;
@@ -101,7 +111,9 @@ const PROJECTILE_RADIUS = 3.2;
 const PROJECTILE_ARM_TIME = 0.32;
 const PROJECTILE_LIFE_SECONDS = 180;
 const PROJECTILE_COOLDOWN_SECONDS = 0.9;
+const PROJECTILE_MUZZLE_SPEED = 260;
 const PROJECTILE_DAMAGE = 72;
+const VIBE_JAM_PORTAL_URL = 'https://vibejam.cc/portal/2026';
 const MULTIPLAYER_PROTOCOL = location.protocol === 'https:' ? 'wss' : 'ws';
 const MULTIPLAYER_PORT = location.port === '3000' ? '3001' : location.port;
 const MULTIPLAYER_URL = `${MULTIPLAYER_PROTOCOL}://${location.hostname}${MULTIPLAYER_PORT ? `:${MULTIPLAYER_PORT}` : ''}`;
@@ -337,6 +349,7 @@ export class Game {
   private cameraTarget = { x: 0, y: 280, zoom: 0.9, rotation: 0 };
 
   private pads: Pad[] = [];
+  private portals: Portal[] = [];
   private targetPadIndex = 0;
   private selectedLander = 1;
   private selectedBodyIndex = 0;
@@ -373,6 +386,8 @@ export class Game {
   private multiplayerName = generatePilotName();
   private multiplayerSendTimer = 0;
   private remotePlayers: Map<number, RemotePlayer> = new Map();
+  private portalParams = new URLSearchParams(location.search);
+  private portalCooldown = 1.2;
 
   async init(statusEl: HTMLElement) {
     statusEl.textContent = 'Preparing 2D lander...';
@@ -382,6 +397,7 @@ export class Game {
     this.ctx = ctx;
     this.input = new InputManager(this.canvas);
 
+    this.applyIncomingPortalState();
     this.cacheHudElements();
     this.setupUiBindings();
     this.resize();
@@ -521,6 +537,39 @@ export class Game {
     this.multiplayerSocket.send(JSON.stringify(data));
   }
 
+  private buildPortalUrl(destination: string) {
+    const base = destination.startsWith('http://') || destination.startsWith('https://')
+      ? destination
+      : `https://${destination}`;
+    const url = new URL(base);
+    const params = new URLSearchParams(this.portalParams);
+    params.set('portal', 'true');
+    params.set('username', this.multiplayerName);
+    params.set('color', LANDERS[this.selectedLander].color);
+    params.set('speed', this.toMetersPerSecond(Math.hypot(this.lander.vx, this.lander.vy)).toFixed(2));
+    params.set('speed_x', this.toMetersPerSecond(this.lander.vx).toFixed(2));
+    params.set('speed_y', this.toMetersPerSecond(this.lander.vy).toFixed(2));
+    params.set('speed_z', '0');
+    params.set('rotation_z', this.lander.angle.toFixed(4));
+    params.set('hp', `${Math.max(1, Math.min(100, Math.round(this.lander.hp)))}`);
+    params.set('ref', `${location.origin}${location.pathname}`);
+
+    for (const [key, value] of params) {
+      url.searchParams.set(key, value);
+    }
+    return url.toString();
+  }
+
+  private applyIncomingPortalState() {
+    const username = this.portalParams.get('username');
+    if (username) this.multiplayerName = username.slice(0, 28);
+
+    const hp = Number(this.portalParams.get('hp'));
+    if (Number.isFinite(hp)) {
+      this.lander.hp = Math.max(1, Math.min(LANDERS[this.selectedLander].hp, hp));
+    }
+  }
+
   private resize() {
     const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     this.width = window.innerWidth;
@@ -544,6 +593,32 @@ export class Game {
       { id: 3, name: names[3] ?? 'Delta', x: 0, y: 0, radius: 230 },
       { id: 4, name: names[4] ?? 'Epsilon', x: 0, y: 0, radius: 240 },
     ].map((pad, index) => ({ ...pad, ...this.baseSurfacePoint(padAngles[index] ?? 0) }));
+    this.createPortals();
+  }
+
+  private createPortals() {
+    const exit = this.baseSurfacePoint(2.92, 480);
+    this.portals = [{
+      id: 'vibe-exit',
+      label: 'Vibe Jam Portal',
+      radius: 95,
+      color: '#ff4fd8',
+      url: this.buildPortalUrl(VIBE_JAM_PORTAL_URL),
+      ...exit,
+    }];
+
+    const ref = this.portalParams.get('ref');
+    if (this.portalParams.get('portal') === 'true' && ref) {
+      const start = this.baseSurfacePoint(-0.42, 420);
+      this.portals.push({
+        id: 'return',
+        label: 'Return Portal',
+        radius: 85,
+        color: '#84ffd3',
+        url: this.buildPortalUrl(ref),
+        ...start,
+      });
+    }
   }
 
   private spawnPlayer() {
@@ -572,6 +647,20 @@ export class Game {
       fuel: stats.fuel,
       hp: stats.hp,
     };
+    const returnPortal = this.portals.find((portal) => portal.id === 'return');
+    if (returnPortal) {
+      const portalAngle = this.angleOf(returnPortal);
+      const portalNormal = this.normalAtAngle(portalAngle);
+      const portalTangent = { x: -portalNormal.y, y: portalNormal.x };
+      const radius = Math.hypot(returnPortal.x, returnPortal.y) + 120;
+      this.lander.x = portalNormal.x * radius;
+      this.lander.y = portalNormal.y * radius;
+      this.lander.vx = portalTangent.x * 10;
+      this.lander.vy = portalTangent.y * 10;
+      this.lander.angle = this.localUpAngleAt(portalAngle);
+      this.portalCooldown = 2.4;
+    }
+    this.applyIncomingPortalState();
     this.input.state.throttle = 0.22;
     this.input.state.sasMode = 1;
     this.camera.x = this.lander.x;
@@ -623,6 +712,7 @@ export class Game {
       this.updateParticles(step);
       remaining -= step;
     }
+    this.updatePortals(dt);
     this.updateCamera(dt);
     this.updateMultiplayer(dt);
   }
@@ -793,12 +883,13 @@ export class Game {
   }
 
   private fireProjectile() {
-    const dir = this.thrustDirection();
+    const dir = this.forwardDirection();
+    const muzzle = this.bodyPointToWorld({ x: 0, y: -42 });
     this.projectiles.push({
-      x: this.lander.x + dir.x * 26,
-      y: this.lander.y + dir.y * 26,
-      vx: this.lander.vx + dir.x * 145,
-      vy: this.lander.vy + dir.y * 145,
+      x: muzzle.x + dir.x * 12,
+      y: muzzle.y + dir.y * 12,
+      vx: this.lander.vx + dir.x * PROJECTILE_MUZZLE_SPEED,
+      vy: this.lander.vy + dir.y * PROJECTILE_MUZZLE_SPEED,
       life: PROJECTILE_LIFE_SECONDS,
       age: 0,
       armed: false,
@@ -876,6 +967,18 @@ export class Game {
     }
   }
 
+  private updatePortals(dt: number) {
+    this.portalCooldown = Math.max(0, this.portalCooldown - dt);
+    if (this.portalCooldown > 0 || this.destroyed) return;
+
+    for (const portal of this.portals) {
+      if (Math.hypot(this.lander.x - portal.x, this.lander.y - portal.y) > portal.radius) continue;
+      location.href = this.buildPortalUrl(portal.url);
+      this.portalCooldown = 5;
+      break;
+    }
+  }
+
   private updateCamera(dt: number) {
     const pad = this.targetPad();
     const altitude = this.groundClearance();
@@ -900,11 +1003,12 @@ export class Game {
     this.cameraTarget.zoom *= 1 - Math.max(0, Math.min(0.25, this.input.state.cameraZoom * 0.02));
     this.cameraTarget.rotation = this.input.state.mapView ? 0 : Math.PI / 2 - this.angleOf(this.lander);
 
-    const t = 1 - Math.pow(0.02, dt);
+    const t = 1 - Math.pow(0.0008, dt);
     this.camera.x = this.lerp(this.camera.x, this.cameraTarget.x, t);
     this.camera.y = this.lerp(this.camera.y, this.cameraTarget.y, t);
     this.camera.zoom = this.lerp(this.camera.zoom, this.cameraTarget.zoom, t);
-    this.camera.rotation = this.normalizeAngle(this.camera.rotation + this.normalizeAngle(this.cameraTarget.rotation - this.camera.rotation) * t);
+    const rotationT = 1 - Math.pow(0.0002, dt);
+    this.camera.rotation = this.normalizeAngle(this.camera.rotation + this.normalizeAngle(this.cameraTarget.rotation - this.camera.rotation) * rotationT);
     this.input.state.cameraZoom = 0;
   }
 
@@ -916,6 +1020,7 @@ export class Game {
     this.drawTrajectory(ctx);
     this.drawTerrain(ctx);
     this.drawPads(ctx);
+    this.drawPortals(ctx);
     this.drawProjectiles(ctx);
     this.drawParticles(ctx);
     this.drawRemotePlayers(ctx);
@@ -1071,43 +1176,72 @@ export class Game {
       const isTarget = pad === this.targetPad();
       const angle = this.angleOf(pad);
       const normal = this.normalAtAngle(angle);
-      const tangent = { x: -normal.y, y: normal.x };
-      const p = this.worldToScreen(this.surfacePoint(angle, 7));
-      const half = pad.radius * this.camera.zoom * 0.52;
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(-angle + Math.PI / 2 + this.camera.rotation);
-      ctx.globalAlpha = isTarget ? 0.28 : 0.12;
-      ctx.fillStyle = isTarget ? '#ffcf5a' : '#84ffd3';
+      const halfAngle = pad.radius / this.bodyRadiusUnits();
+      const start = this.worldToScreen(this.surfacePoint(angle - halfAngle, 9));
+      const end = this.worldToScreen(this.surfacePoint(angle + halfAngle, 9));
+      const p = this.worldToScreen(this.surfacePoint(angle, 12));
+
+      ctx.strokeStyle = isTarget ? 'rgba(255,207,90,0.24)' : 'rgba(132,255,211,0.14)';
+      ctx.lineWidth = Math.max(14, 24 * this.camera.zoom);
+      ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.ellipse(0, 0, half * 1.25, 18 * this.camera.zoom, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(-angle + Math.PI / 2 + this.camera.rotation);
-      ctx.strokeStyle = pad === this.targetPad() ? '#ffcf5a' : '#84ffd3';
-      ctx.fillStyle = isTarget ? 'rgba(255,207,90,0.22)' : 'rgba(132,255,211,0.16)';
-      ctx.lineWidth = pad === this.targetPad() ? 3 : 2;
-      ctx.beginPath();
-      ctx.roundRect(-half, -5, half * 2, 10, 4);
-      ctx.fill();
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
       ctx.stroke();
-      ctx.restore();
+
+      ctx.strokeStyle = isTarget ? '#ffcf5a' : '#84ffd3';
+      ctx.lineWidth = Math.max(4, 8 * this.camera.zoom);
+      ctx.beginPath();
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+
       ctx.fillStyle = isTarget ? '#fff4c4' : '#dffdf4';
       ctx.font = `${isTarget ? 12 : 11}px ui-monospace, monospace`;
       ctx.textAlign = 'center';
-      ctx.fillText(pad.name, p.x + normal.x * 24, p.y - normal.y * 24);
+      const label = this.worldToScreen(this.surfacePoint(angle, 42));
+      ctx.fillText(pad.name, label.x, label.y);
 
       if (isTarget) {
         ctx.strokeStyle = 'rgba(255,207,90,0.42)';
         ctx.setLineDash([5, 6]);
+        const beaconStart = this.worldToScreen(this.surfacePoint(angle, 46));
+        const beaconEnd = this.worldToScreen(this.surfacePoint(angle, 180));
         ctx.beginPath();
-        ctx.moveTo(p.x + normal.x * 30, p.y - normal.y * 30);
-        ctx.lineTo(p.x + normal.x * 110, p.y - normal.y * 110);
+        ctx.moveTo(beaconStart.x, beaconStart.y);
+        ctx.lineTo(beaconEnd.x, beaconEnd.y);
         ctx.stroke();
         ctx.setLineDash([]);
       }
+    }
+  }
+
+  private drawPortals(ctx: CanvasRenderingContext2D) {
+    const pulse = 0.5 + Math.sin(performance.now() * 0.005) * 0.5;
+    for (const portal of this.portals) {
+      const p = this.worldToScreen(portal);
+      const radius = Math.max(16, portal.radius * this.camera.zoom);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.strokeStyle = portal.color;
+      ctx.shadowColor = portal.color;
+      ctx.shadowBlur = 20;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius * (0.78 + pulse * 0.08), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 0.26;
+      ctx.lineWidth = 10;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '12px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(portal.label, p.x, p.y - radius - 10);
     }
   }
 
@@ -1639,6 +1773,10 @@ export class Game {
   }
 
   private thrustDirection() {
+    return { x: Math.sin(this.lander.angle), y: Math.cos(this.lander.angle) };
+  }
+
+  private forwardDirection() {
     return { x: Math.sin(this.lander.angle), y: Math.cos(this.lander.angle) };
   }
 
