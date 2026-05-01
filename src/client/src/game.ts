@@ -106,12 +106,14 @@ const LEG_DAMPING = 14;
 const LEG_FRICTION = 3.2;
 const LEG_TORQUE_RESPONSE = 0.0026;
 const LEG_RESTITUTION = 0.12;
+const BRAKING_INTENT_DOT_THRESHOLD = -0.02;
 const LANDER_COLLISION_RADIUS = 25;
 const PROJECTILE_RADIUS = 3.2;
 const PROJECTILE_ARM_TIME = 0.32;
 const PROJECTILE_LIFE_SECONDS = 180;
 const PROJECTILE_COOLDOWN_SECONDS = 0.9;
 const PROJECTILE_MUZZLE_SPEED = 82;
+const PROJECTILE_MIN_MUZZLE_SPEED = 34;
 const PROJECTILE_ESCAPE_SPEED_FRACTION = 0.72;
 const PROJECTILE_DAMAGE = 72;
 const VIBE_JAM_PORTAL_URL = 'https://vibejam.cc/portal/2026';
@@ -663,7 +665,7 @@ export class Game {
     }
     this.applyIncomingPortalState();
     this.input.state.throttle = 0.22;
-    this.input.state.sasMode = 1;
+    this.input.state.sasMode = 0;
     this.camera.x = this.lander.x;
     this.camera.y = this.lander.y;
   }
@@ -727,9 +729,6 @@ export class Game {
     if (s.brakeAssist) this.applyBrakeAssist(dt);
     if (s.sasMode > 0 && Math.abs(angularInput) < 0.05 && !s.brakeAssist) {
       this.lander.angularVelocity *= Math.pow(0.03, dt);
-      const localUp = this.localUpAngleAt(this.angleOf(this.lander));
-      const uprightError = this.normalizeAngle(localUp - this.lander.angle);
-      this.lander.angularVelocity += uprightError * 1.8 * dt;
     }
 
     if (s.fineControl) angularInput *= 0.35;
@@ -737,7 +736,8 @@ export class Game {
     this.lander.angularVelocity *= Math.pow(0.18, dt);
     this.lander.angle = this.normalizeAngle(this.lander.angle + this.lander.angularVelocity * dt);
 
-    const speedBeforeThrust = Math.hypot(this.lander.vx, this.lander.vy);
+    const stepStartVelocity = { x: this.lander.vx, y: this.lander.vy };
+    const stepStartSpeed = Math.hypot(stepStartVelocity.x, stepStartVelocity.y);
     const brakeAlignment = s.brakeAssist ? this.retrogradeAlignment() : 0;
     const brakeThrottle = brakeAlignment > 0.58 ? 0.25 + brakeAlignment * 0.65 : 0;
     const throttle = s.brakeAssist ? Math.max(s.throttle, brakeThrottle) : s.throttle;
@@ -746,8 +746,8 @@ export class Game {
       const boost = s.boost ? 1.35 : 1;
       const thrust = this.lunarRatedEngineAccel() * stats.maxTwr * throttle * boost;
       const dir = this.thrustDirection();
-      if (this.isBrakingBurn(dir, speedBeforeThrust)) {
-        brakingBurnSpeedLimit = speedBeforeThrust;
+      if (this.hasBrakingIntent(dir, stepStartVelocity)) {
+        brakingBurnSpeedLimit = stepStartSpeed;
       }
       this.lander.vx += dir.x * thrust * dt;
       this.lander.vy += dir.y * thrust * dt;
@@ -762,8 +762,22 @@ export class Game {
       const frame = this.localFrame(this.lander);
       const radialAccel = -s.translateZ * RCS_ACCEL + s.translateY * RCS_VERTICAL_ACCEL;
       const tangentialAccel = s.translateX * RCS_ACCEL;
-      this.lander.vx += (frame.tangent.x * tangentialAccel + frame.normal.x * radialAccel) * dt;
-      this.lander.vy += (frame.tangent.y * tangentialAccel + frame.normal.y * radialAccel) * dt;
+      const accel = {
+        x: frame.tangent.x * tangentialAccel + frame.normal.x * radialAccel,
+        y: frame.tangent.y * tangentialAccel + frame.normal.y * radialAccel,
+      };
+      const accelMagnitude = Math.hypot(accel.x, accel.y);
+      if (accelMagnitude > 0.01) {
+        const rcsDirection = { x: accel.x / accelMagnitude, y: accel.y / accelMagnitude };
+        if (this.hasBrakingIntent(rcsDirection, stepStartVelocity)) {
+          brakingBurnSpeedLimit = stepStartSpeed;
+        }
+      }
+      this.lander.vx += accel.x * dt;
+      this.lander.vy += accel.y * dt;
+      if (brakingBurnSpeedLimit !== null) {
+        this.preventBrakingBurnSpeedup(brakingBurnSpeedLimit);
+      }
       this.lander.fuel = Math.max(0, this.lander.fuel - (Math.abs(s.translateX) + Math.abs(s.translateZ) + Math.abs(s.translateY)) * 0.12 * dt);
     }
 
@@ -803,10 +817,12 @@ export class Game {
     return Math.max(0, -(thrust.x * this.lander.vx + thrust.y * this.lander.vy) / speed);
   }
 
-  private isBrakingBurn(direction: Vec2, speed: number) {
+  private hasBrakingIntent(direction: Vec2, velocity: Vec2) {
+    const speed = Math.hypot(velocity.x, velocity.y);
     if (speed < 0.5) return false;
-    const alongVelocity = (direction.x * this.lander.vx + direction.y * this.lander.vy) / speed;
-    return alongVelocity < -0.12;
+    const directionLength = Math.hypot(direction.x, direction.y) || 1;
+    const alongVelocity = (direction.x * velocity.x + direction.y * velocity.y) / (speed * directionLength);
+    return alongVelocity < BRAKING_INTENT_DOT_THRESHOLD;
   }
 
   private preventBrakingBurnSpeedup(previousSpeed: number) {
@@ -924,10 +940,7 @@ export class Game {
   private fireProjectile() {
     const dir = this.forwardDirection();
     const muzzle = this.bodyPointToWorld({ x: 0, y: -42 });
-    const velocity = this.cappedProjectileVelocity(muzzle, {
-      x: this.lander.vx + dir.x * PROJECTILE_MUZZLE_SPEED,
-      y: this.lander.vy + dir.y * PROJECTILE_MUZZLE_SPEED,
-    });
+    const velocity = this.projectileLaunchVelocity(muzzle, dir);
     this.projectiles.push({
       x: muzzle.x + dir.x * 12,
       y: muzzle.y + dir.y * 12,
@@ -941,13 +954,38 @@ export class Game {
     this.playBurst(420, 0.08, 'square', 0.12);
   }
 
-  private cappedProjectileVelocity(origin: Vec2, velocity: Vec2) {
+  private projectileLaunchVelocity(origin: Vec2, direction: Vec2) {
+    const muzzleSpeed = this.cappedMuzzleSpeed(origin, direction);
+    return {
+      x: this.lander.vx + direction.x * muzzleSpeed,
+      y: this.lander.vy + direction.y * muzzleSpeed,
+    };
+  }
+
+  private cappedMuzzleSpeed(origin: Vec2, direction: Vec2) {
     const localEscapeSpeed = Math.sqrt(2 * this.gravity() * Math.max(1, Math.hypot(origin.x, origin.y)));
     const maxSpeed = localEscapeSpeed * PROJECTILE_ESCAPE_SPEED_FRACTION;
-    const speed = Math.hypot(velocity.x, velocity.y);
-    if (speed <= maxSpeed) return velocity;
-    const scale = maxSpeed / speed;
-    return { x: velocity.x * scale, y: velocity.y * scale };
+    const inheritedVelocity = { x: this.lander.vx, y: this.lander.vy };
+    const fullVelocity = {
+      x: inheritedVelocity.x + direction.x * PROJECTILE_MUZZLE_SPEED,
+      y: inheritedVelocity.y + direction.y * PROJECTILE_MUZZLE_SPEED,
+    };
+    if (Math.hypot(fullVelocity.x, fullVelocity.y) <= maxSpeed) {
+      return PROJECTILE_MUZZLE_SPEED;
+    }
+
+    const inheritedSpeed = Math.hypot(inheritedVelocity.x, inheritedVelocity.y);
+    const alongDirection = inheritedVelocity.x * direction.x + inheritedVelocity.y * direction.y;
+    const discriminant = alongDirection * alongDirection - (inheritedSpeed * inheritedSpeed - maxSpeed * maxSpeed);
+    if (discriminant <= 0) {
+      return PROJECTILE_MIN_MUZZLE_SPEED;
+    }
+
+    const allowed = -alongDirection + Math.sqrt(discriminant);
+    if (allowed <= 0) {
+      return PROJECTILE_MIN_MUZZLE_SPEED;
+    }
+    return Math.max(PROJECTILE_MIN_MUZZLE_SPEED, Math.min(PROJECTILE_MUZZLE_SPEED, allowed));
   }
 
   private updateProjectiles(dt: number) {
