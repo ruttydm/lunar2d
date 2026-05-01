@@ -50,10 +50,13 @@ import {
   lerp,
   normalizeAngle,
   bodyPointToWorld as bodyPointToWorldInFrame,
-  normalizedDirection,
   positiveAngle,
   preventBrakingBurnSpeedup,
   projectileLaunchVelocity,
+  screenAngleForWorldVector,
+  SHIP_FRAME_POINTS,
+  shipFrame,
+  shipScreenRotation,
 } from './physics/flight';
 import {
   baseTerrainRadiusAtAngle,
@@ -678,8 +681,9 @@ export class Game {
   }
 
   private fireProjectile() {
-    const dir = this.forwardDirection();
-    const muzzle = this.bodyPointToWorld({ x: 0, y: -42 });
+    const frame = this.shipFrame();
+    const dir = frame.forward;
+    const muzzle = frame.nose;
     const velocity = projectileLaunchVelocity({
       origin: muzzle,
       inheritedVelocity: { x: this.lander.vx, y: this.lander.vy },
@@ -751,10 +755,10 @@ export class Game {
   private projectileHitsLander(projectile: Projectile) {
     const hitPoints = [
       this.lander,
-      this.bodyPointToWorld({ x: 0, y: -18 }),
-      this.bodyPointToWorld({ x: 0, y: 8 }),
-      this.bodyPointToWorld({ x: -14, y: 10 }),
-      this.bodyPointToWorld({ x: 14, y: 10 }),
+      this.bodyPointToWorld(SHIP_FRAME_POINTS.canopy),
+      this.bodyPointToWorld(SHIP_FRAME_POINTS.lowerHull),
+      this.bodyPointToWorld(SHIP_FRAME_POINTS.leftHull),
+      this.bodyPointToWorld(SHIP_FRAME_POINTS.rightHull),
       ...this.legFootPoints(),
     ];
 
@@ -986,9 +990,10 @@ export class Game {
       const p = this.worldToScreen(this.surfacePoint(angle, 3));
       const rx = (18 + frac * 32) * this.camera.zoom;
       const ry = rx * 0.28;
+      const tangent = { x: -Math.sin(angle), y: Math.cos(angle) };
       ctx.save();
       ctx.translate(p.x, p.y);
-      ctx.rotate(-angle + this.camera.rotation);
+      ctx.rotate(screenAngleForWorldVector(tangent, this.camera.rotation));
       ctx.globalAlpha = 0.22;
       ctx.fillStyle = '#30302d';
       ctx.beginPath();
@@ -1187,7 +1192,7 @@ export class Game {
     ctx.globalAlpha = Math.max(0.12, Math.min(0.45, 1 - altitude / 420));
     ctx.fillStyle = '#24231f';
     ctx.translate(shadow.x, shadow.y);
-    ctx.rotate(-this.angleOf(this.lander) + Math.PI / 2 + this.camera.rotation);
+    ctx.rotate(screenAngleForWorldVector({ x: -normal.y, y: normal.x }, this.camera.rotation));
     ctx.beginPath();
     ctx.ellipse(normal.x * 4, normal.y * 4, 36 * this.camera.zoom, 8 * this.camera.zoom, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -1195,7 +1200,7 @@ export class Game {
 
     ctx.save();
     ctx.translate(p.x, p.y);
-    ctx.rotate(this.lander.angle + this.camera.rotation);
+    ctx.rotate(shipScreenRotation(this.lander.angle, this.camera.rotation));
     ctx.scale(scale, scale);
     const leftCompression = Math.max(0, Math.min(12, this.surfacePenetration(this.bodyPointToWorld(LEG_POINTS[0])) + 4));
     const rightCompression = Math.max(0, Math.min(12, this.surfacePenetration(this.bodyPointToWorld(LEG_POINTS[1])) + 4));
@@ -1311,20 +1316,7 @@ export class Game {
     for (const remote of this.multiplayer.remotePlayers.values()) {
       if (remote.bodyId !== this.currentBody().id || now - remote.updatedAt > 5000) continue;
       const p = this.worldToScreen(remote);
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(remote.angle + this.camera.rotation);
-      ctx.strokeStyle = '#ffcf5a';
-      ctx.fillStyle = 'rgba(255,207,90,0.32)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(0, -18);
-      ctx.lineTo(13, 12);
-      ctx.lineTo(-13, 12);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
+      this.drawProjectedShipMarker(ctx, (point) => this.worldToScreen(point), remote, 'rgba(255,207,90,0.32)', '#ffcf5a', 0.5);
       ctx.fillStyle = '#ffcf5a';
       ctx.font = '10px ui-monospace, monospace';
       ctx.textAlign = 'center';
@@ -1393,18 +1385,7 @@ export class Game {
       ctx.fillText(portal.id === 'return' ? 'RETURN' : 'PORTAL', p.x + 9, p.y - 7);
     }
 
-    const lp = toMap(this.lander);
-    ctx.save();
-    ctx.translate(lp.x, lp.y);
-    ctx.rotate(this.lander.angle);
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.moveTo(0, -9);
-    ctx.lineTo(7, 8);
-    ctx.lineTo(-7, 8);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
+    this.drawProjectedShipMarker(ctx, toMap, this.lander, '#ffffff', 'rgba(255,255,255,0.35)');
 
     ctx.fillStyle = '#dffdf4';
     ctx.font = '13px ui-monospace, monospace';
@@ -1538,18 +1519,7 @@ export class Game {
       ctx.fillText(portal.id === 'return' ? 'R' : 'VJ', p.x, p.y - 7);
     }
 
-    const lp = toMap(this.lander);
-    ctx.save();
-    ctx.translate(lp.x, lp.y);
-    ctx.rotate(this.lander.angle);
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.moveTo(0, -6);
-    ctx.lineTo(5, 6);
-    ctx.lineTo(-5, 6);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
+    this.drawProjectedShipMarker(ctx, toMap, this.lander, '#ffffff', 'rgba(255,255,255,0.38)', 0.68);
 
     ctx.fillStyle = '#84ffd3';
     ctx.font = '9px ui-monospace, monospace';
@@ -1558,6 +1528,39 @@ export class Game {
     ctx.fillStyle = '#ffcf5a';
     ctx.textAlign = 'right';
     ctx.fillText(target.name, w - 7, 12);
+  }
+
+  private drawProjectedShipMarker(
+    ctx: CanvasRenderingContext2D,
+    project: (point: Vec2) => Vec2,
+    snapshot: { x: number; y: number; angle: number },
+    fill: string,
+    stroke = 'rgba(255,255,255,0.35)',
+    scale = 1,
+  ) {
+    const frame = this.shipFrame(snapshot);
+    const center = project(frame.center);
+    const nose = project(frame.nose);
+    const left = project(frame.leftMarker);
+    const right = project(frame.rightMarker);
+    const pointToward = (point: Vec2) => ({
+      x: center.x + (point.x - center.x) * scale,
+      y: center.y + (point.y - center.y) * scale,
+    });
+    const n = pointToward(nose);
+    const l = pointToward(left);
+    const r = pointToward(right);
+
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = Math.max(1, 1.4 * scale);
+    ctx.beginPath();
+    ctx.moveTo(n.x, n.y);
+    ctx.lineTo(r.x, r.y);
+    ctx.lineTo(l.x, l.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
   }
 
   private currentObjectiveText(localTwr: string) {
@@ -1821,16 +1824,7 @@ export class Game {
   }
 
   private thrustDirection() {
-    return this.visualNoseDirection();
-  }
-
-  private forwardDirection() {
-    return this.visualNoseDirection();
-  }
-
-  private visualNoseDirection() {
-    const nose = this.bodyPointToWorld({ x: 0, y: -42 });
-    return normalizedDirection(this.lander, nose);
+    return this.shipFrame().forward;
   }
 
   private currentBody() {
@@ -1957,19 +1951,24 @@ export class Game {
     return bodyPointToWorldInFrame(point, snapshot);
   }
 
+  private shipFrame(snapshot: { x: number; y: number; angle: number } = this.lander) {
+    return shipFrame(snapshot);
+  }
+
   private legFootPoints(snapshot: LanderSnapshot = this.lander) {
     return LEG_POINTS.map((point) => this.bodyPointToWorld(point, snapshot));
   }
 
   private emitExhaust(dt: number, throttle: number) {
-    const dir = this.thrustDirection();
+    const frame = this.shipFrame();
+    const dir = frame.exhaust;
     const amount = Math.ceil(throttle * 16 * dt * 60 / 10);
     for (let i = 0; i < amount; i++) {
       this.particles.push({
-        x: this.lander.x - dir.x * 18 + (Math.random() - 0.5) * 6,
-        y: this.lander.y - dir.y * 18 + (Math.random() - 0.5) * 6,
-        vx: -dir.x * (30 + Math.random() * 24) + (Math.random() - 0.5) * 12,
-        vy: -dir.y * (30 + Math.random() * 24) + (Math.random() - 0.5) * 12,
+        x: frame.nozzle.x + (Math.random() - 0.5) * 6,
+        y: frame.nozzle.y + (Math.random() - 0.5) * 6,
+        vx: dir.x * (30 + Math.random() * 24) + (Math.random() - 0.5) * 12,
+        vy: dir.y * (30 + Math.random() * 24) + (Math.random() - 0.5) * 12,
         life: 0.35 + Math.random() * 0.25,
         maxLife: 0.6,
         color: Math.random() < 0.45 ? '#ffcf5a' : '#ff8b35',

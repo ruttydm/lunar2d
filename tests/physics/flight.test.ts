@@ -7,7 +7,12 @@ import {
   normalizeAngle,
   positiveAngle,
   preventBrakingBurnSpeedup,
+  projectWorldVectorToScreen,
   projectileLaunchVelocity,
+  screenAngleForWorldVector,
+  SHIP_FRAME_POINTS,
+  shipFrame,
+  shipScreenRotation,
 } from '../../src/client/src/physics/flight';
 
 describe('flight physics helpers', () => {
@@ -48,12 +53,53 @@ describe('flight physics helpers', () => {
 
   test('visual nose direction matches the ship thrust frame', () => {
     const lander = { x: 10, y: 20, angle: 0 };
-    const nose = bodyPointToWorld({ x: 0, y: -42 }, lander);
+    const nose = bodyPointToWorld(SHIP_FRAME_POINTS.nose, lander);
     expect(normalizedDirection(lander, nose)).toEqual({ x: 0, y: 1 });
 
     const rightFacing = { x: 0, y: 0, angle: Math.PI / 2 };
-    const rightNose = bodyPointToWorld({ x: 0, y: -42 }, rightFacing);
+    const rightNose = bodyPointToWorld(SHIP_FRAME_POINTS.nose, rightFacing);
     expect(normalizedDirection(rightFacing, rightNose).x).toBeCloseTo(1, 8);
     expect(normalizedDirection(rightFacing, rightNose).y).toBeCloseTo(0, 8);
+  });
+
+  test('ship frame keeps thrust, muzzle, exhaust and marker axes coherent', () => {
+    const upward = shipFrame({ x: 10, y: 20, angle: 0 });
+    expect(upward.forward).toEqual({ x: 0, y: 1 });
+    expect(upward.exhaust).toEqual({ x: 0, y: -1 });
+    expect(upward.nose.y).toBeGreaterThan(upward.center.y);
+    expect(upward.nozzle.y).toBeLessThan(upward.center.y);
+    expect(upward.leftMarker.x).toBeLessThan(upward.center.x);
+    expect(upward.rightMarker.x).toBeGreaterThan(upward.center.x);
+
+    const right = shipFrame({ x: 0, y: 0, angle: Math.PI / 2 });
+    expect(right.forward.x).toBeCloseTo(1, 8);
+    expect(right.forward.y).toBeCloseTo(0, 8);
+    expect(right.exhaust.x).toBeCloseTo(-1, 8);
+    expect(right.exhaust.y).toBeCloseTo(0, 8);
+    expect(right.nose.x).toBeGreaterThan(right.center.x);
+    expect(right.nozzle.x).toBeLessThan(right.center.x);
+  });
+
+  test('ship screen rotation matches the projected world-space nose direction', () => {
+    const body = { x: 0, y: 0, angle: 1.1 };
+    const cameraRotation = -0.45;
+    const frame = shipFrame(body);
+    const dx = frame.nose.x - frame.center.x;
+    const dy = frame.nose.y - frame.center.y;
+    const projected = projectWorldVectorToScreen({ x: dx, y: dy }, cameraRotation);
+    const drawnRotation = shipScreenRotation(body.angle, cameraRotation);
+    const drawnNose = {
+      x: Math.sin(drawnRotation),
+      y: -Math.cos(drawnRotation),
+    };
+
+    expect(projected.x / Math.hypot(projected.x, projected.y)).toBeCloseTo(drawnNose.x, 8);
+    expect(projected.y / Math.hypot(projected.x, projected.y)).toBeCloseTo(drawnNose.y, 8);
+  });
+
+  test('screen angle helper follows camera-projected world vectors', () => {
+    const projected = projectWorldVectorToScreen({ x: 0, y: 1 }, Math.PI / 6);
+    expect(screenAngleForWorldVector({ x: 0, y: 1 }, Math.PI / 6)).toBeCloseTo(Math.atan2(projected.y, projected.x), 8);
+    expect(screenAngleForWorldVector({ x: 1, y: 0 }, 0)).toBeCloseTo(0, 8);
   });
 });

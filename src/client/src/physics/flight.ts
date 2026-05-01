@@ -1,5 +1,16 @@
 import type { Vec2 } from '../domain/model';
 
+export const SHIP_FRAME_POINTS = {
+  nose: { x: 0, y: -42 },
+  canopy: { x: 0, y: -18 },
+  lowerHull: { x: 0, y: 8 },
+  leftHull: { x: -14, y: 10 },
+  rightHull: { x: 14, y: 10 },
+  engineNozzle: { x: 0, y: 20 },
+  leftMarker: { x: -20, y: 18 },
+  rightMarker: { x: 20, y: 18 },
+} as const satisfies Record<string, Vec2>;
+
 export function speed(vector: Vec2) {
   return Math.hypot(vector.x, vector.y);
 }
@@ -97,4 +108,39 @@ export function normalizedDirection(from: Vec2, to: Vec2) {
   const dy = to.y - from.y;
   const length = Math.hypot(dx, dy) || 1;
   return { x: dx / length, y: dy / length };
+}
+
+export function shipFrame(body: { x: number; y: number; angle: number }) {
+  const center = { x: body.x, y: body.y };
+  const nose = bodyPointToWorld(SHIP_FRAME_POINTS.nose, body);
+  const nozzle = bodyPointToWorld(SHIP_FRAME_POINTS.engineNozzle, body);
+  const leftMarker = bodyPointToWorld(SHIP_FRAME_POINTS.leftMarker, body);
+  const rightMarker = bodyPointToWorld(SHIP_FRAME_POINTS.rightMarker, body);
+  return {
+    center,
+    nose,
+    nozzle,
+    leftMarker,
+    rightMarker,
+    forward: normalizedDirection(center, nose),
+    exhaust: normalizedDirection(center, nozzle),
+  };
+}
+
+export function shipScreenRotation(bodyAngle: number, cameraRotation: number) {
+  return normalizeAngle(bodyAngle - cameraRotation);
+}
+
+export function projectWorldVectorToScreen(vector: Vec2, cameraRotation: number) {
+  const cos = Math.cos(cameraRotation);
+  const sin = Math.sin(cameraRotation);
+  return {
+    x: vector.x * cos - vector.y * sin,
+    y: -(vector.x * sin + vector.y * cos),
+  };
+}
+
+export function screenAngleForWorldVector(vector: Vec2, cameraRotation: number) {
+  const projected = projectWorldVectorToScreen(vector, cameraRotation);
+  return Math.atan2(projected.y, projected.x);
 }
