@@ -15,6 +15,9 @@ interface Pad {
   x: number;
   y: number;
   radius: number;
+  angle: number;
+  platformRadius: number;
+  damaged: boolean;
 }
 
 interface Portal {
@@ -62,6 +65,34 @@ interface Particle {
   size: number;
 }
 
+interface TerrainSample {
+  angle: number;
+  radius: number;
+}
+
+interface LanderSnapshot {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  angle: number;
+  angularVelocity: number;
+  fuel: number;
+  hp: number;
+}
+
+interface ContactPoint {
+  label: 'left-leg' | 'right-leg' | 'hull';
+  point: Vec2;
+  bodyPoint: Vec2;
+  penetration: number;
+  normal: Vec2;
+  tangent: Vec2;
+  footVelocity: Vec2;
+  radialVelocity: number;
+  tangentVelocity: number;
+}
+
 interface LanderStats {
   name: string;
   mass: number;
@@ -99,6 +130,7 @@ const GAME_MOON_RADIUS_M = 42_000;
 const WORLD_METERS_PER_UNIT = 0.25;
 const MOON_GRAVITY_MPS2 = 1.625;
 const PHYSICS_STEP = 1 / 120;
+const TERRAIN_SAMPLE_COUNT = 2048;
 const RCS_ACCEL = 0.95 / WORLD_METERS_PER_UNIT;
 const RCS_VERTICAL_ACCEL = 0.65 / WORLD_METERS_PER_UNIT;
 const LEG_SPRING = 42;
@@ -106,6 +138,7 @@ const LEG_DAMPING = 14;
 const LEG_FRICTION = 3.2;
 const LEG_TORQUE_RESPONSE = 0.0026;
 const LEG_RESTITUTION = 0.12;
+const GROUND_CLEARANCE_BUFFER = 1.8;
 const BRAKING_INTENT_DOT_THRESHOLD = -0.02;
 const LANDER_COLLISION_RADIUS = 25;
 const PROJECTILE_RADIUS = 3.2;
@@ -352,6 +385,7 @@ export class Game {
   private cameraTarget = { x: 0, y: 280, zoom: 0.9, rotation: 0 };
 
   private pads: Pad[] = [];
+  private terrainSamples: TerrainSample[] = [];
   private portals: Portal[] = [];
   private targetPadIndex = 0;
   private selectedLander = 1;
@@ -360,6 +394,9 @@ export class Game {
   private streak = 0;
   private landed = false;
   private destroyed = false;
+  private debugOverlay = false;
+  private objectivePhase: 'land' | 'orbit' | 'return' = 'land';
+  private lastImpactReport = 'nominal';
 
   private lander = {
     x: 0,
@@ -458,6 +495,11 @@ export class Game {
       if (['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(event.code)) {
         this.selectedLander = Number(event.code.replace('Digit', '')) - 1;
         if (!this.destroyed && !this.landed) this.spawnPlayer();
+      }
+
+      if (event.code === 'F3') {
+        this.debugOverlay = !this.debugOverlay;
+        event.preventDefault();
       }
     });
   }
@@ -589,30 +631,44 @@ export class Game {
     const names = body.padNames;
     const padAngles = [-2.45, -1.25, 0.15, 1.35, 2.58];
     this.pads = [];
-    this.pads = [
+    const padSpecs = [
       { id: 0, name: names[0] ?? 'Alpha', x: 0, y: 0, radius: 320 },
       { id: 1, name: names[1] ?? 'Beta', x: 0, y: 0, radius: 280 },
       { id: 2, name: names[2] ?? 'Gamma', x: 0, y: 0, radius: 250 },
       { id: 3, name: names[3] ?? 'Delta', x: 0, y: 0, radius: 230 },
       { id: 4, name: names[4] ?? 'Epsilon', x: 0, y: 0, radius: 240 },
-    ].map((pad, index) => ({ ...pad, ...this.baseSurfacePoint(padAngles[index] ?? 0) }));
+    ];
+    this.pads = padSpecs.map((pad, index) => {
+      const angle = padAngles[index] ?? 0;
+      const platformRadius = this.padPlatformRadius(angle, pad.radius);
+      const normal = this.normalAtAngle(angle);
+      return {
+        ...pad,
+        angle,
+        platformRadius,
+        damaged: false,
+        x: normal.x * platformRadius,
+        y: normal.y * platformRadius,
+      };
+    });
+    this.rebuildTerrainCache();
     this.createPortals();
   }
 
   private createPortals() {
-    const exit = this.baseSurfacePoint(2.92, 480);
-    this.portals = [{
-      id: 'vibe-exit',
-      label: 'Vibe Jam Portal',
+    const exitAngles = [-2.95, 0.72, 2.58];
+    this.portals = exitAngles.map((angle, index) => ({
+      id: `vibe-exit-${index + 1}`,
+      label: `Vibe Jam ${index + 1}`,
       radius: 95,
-      color: '#ff4fd8',
+      color: index === 1 ? '#ffcf5a' : '#ff4fd8',
       url: this.buildPortalUrl(VIBE_JAM_PORTAL_URL),
-      ...exit,
-    }];
+      ...this.surfacePoint(angle, 480),
+    }));
 
     const ref = this.portalParams.get('ref');
     if (this.portalParams.get('portal') === 'true' && ref) {
-      const start = this.baseSurfacePoint(-0.42, 420);
+      const start = this.surfacePoint(-0.42, 420);
       this.portals.push({
         id: 'return',
         label: 'Return Portal',
@@ -627,13 +683,15 @@ export class Game {
   private spawnPlayer() {
     this.destroyed = false;
     this.landed = false;
+    this.objectivePhase = 'land';
+    this.lastImpactReport = 'nominal';
     this.projectiles = [];
     this.particles = [];
     this.targetPadIndex = Math.floor(Math.random() * this.pads.length);
     const pad = this.targetPad();
     const side = Math.random() < 0.5 ? -1 : 1;
     const stats = LANDERS[this.selectedLander];
-    const padAngle = this.angleOf(pad);
+    const padAngle = pad.angle;
     const spawnAngle = padAngle + side * (0.52 + Math.random() * 0.34);
     const normal = this.normalAtAngle(spawnAngle);
     const tangent = { x: -normal.y * side, y: normal.x * side };
@@ -664,7 +722,7 @@ export class Game {
       this.portalCooldown = 2.4;
     }
     this.applyIncomingPortalState();
-    this.input.state.throttle = 0.22;
+    this.input.state.throttle = 0;
     this.input.state.sasMode = 0;
     this.camera.x = this.lander.x;
     this.camera.y = this.lander.y;
@@ -716,6 +774,7 @@ export class Game {
       remaining -= step;
     }
     this.updatePortals(dt);
+    this.updateObjectivePhase();
     this.updateCamera(dt);
     this.updateMultiplayer(dt);
   }
@@ -724,6 +783,7 @@ export class Game {
     const stats = LANDERS[this.selectedLander];
     const s = this.input.state;
     const altitude = this.groundClearance();
+    const previous = this.landerSnapshot();
 
     let angularInput = s.yaw + s.roll - s.pitch * 0.35;
     if (s.brakeAssist) this.applyBrakeAssist(dt);
@@ -789,6 +849,7 @@ export class Game {
     }
     this.lander.x += this.lander.vx * dt;
     this.lander.y += this.lander.vy * dt;
+    this.resolveSweptTerrainContact(previous);
 
     this.fireCooldown = Math.max(0, this.fireCooldown - dt);
     if (s.fire && this.fireCooldown <= 0) this.fireProjectile();
@@ -833,72 +894,123 @@ export class Game {
     this.lander.vy *= scale;
   }
 
-  private checkSurfaceContact(dt: number) {
-    const footContacts = this.legFootPoints()
-      .map((foot) => {
-        const angle = this.angleOf(foot);
-        const normal = this.normalAtAngle(angle);
-        const tangent = { x: -normal.y, y: normal.x };
-        const groundRadius = this.terrainRadiusAtAngle(angle);
-        const distance = Math.hypot(foot.x, foot.y);
-        return { foot, normal, tangent, groundRadius, penetration: groundRadius - distance };
-      })
-      .filter((contact) => contact.penetration > 0);
+  private landerSnapshot(): LanderSnapshot {
+    return {
+      x: this.lander.x,
+      y: this.lander.y,
+      vx: this.lander.vx,
+      vy: this.lander.vy,
+      angle: this.lander.angle,
+      angularVelocity: this.lander.angularVelocity,
+      fuel: this.lander.fuel,
+      hp: this.lander.hp,
+    };
+  }
 
-    const hullBottom = this.bodyPointToWorld({ x: 0, y: HULL_BOTTOM });
-    const hullPenetration = this.surfacePenetration(hullBottom);
-    if (footContacts.length === 0 && hullPenetration <= 0) return;
+  private resolveSweptTerrainContact(previous: LanderSnapshot) {
+    if (this.minGroundClearance(this.lander) >= GROUND_CLEARANCE_BUFFER) return;
+
+    const current = this.landerSnapshot();
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 10; i++) {
+      const mid = (lo + hi) * 0.5;
+      const sample = this.interpolateLanderSnapshot(previous, current, mid);
+      if (this.minGroundClearance(sample) >= GROUND_CLEARANCE_BUFFER) lo = mid;
+      else hi = mid;
+    }
+
+    const safe = this.interpolateLanderSnapshot(previous, current, Math.max(0, lo));
+    this.lander.x = safe.x;
+    this.lander.y = safe.y;
+    this.lander.angle = safe.angle;
+
+    const contacts = this.contactPoints(this.lander).filter((contact) => contact.penetration > -GROUND_CLEARANCE_BUFFER);
+    const deepest = contacts.reduce<ContactPoint | null>((best, contact) => {
+      if (!best || contact.penetration > best.penetration) return contact;
+      return best;
+    }, null);
+    if (!deepest) return;
+
+    const correction = Math.max(0, deepest.penetration + GROUND_CLEARANCE_BUFFER);
+    this.lander.x += deepest.normal.x * correction;
+    this.lander.y += deepest.normal.y * correction;
+    const inwardSpeed = this.lander.vx * deepest.normal.x + this.lander.vy * deepest.normal.y;
+    if (inwardSpeed < 0) {
+      this.lander.vx -= deepest.normal.x * inwardSpeed;
+      this.lander.vy -= deepest.normal.y * inwardSpeed;
+    }
+  }
+
+  private interpolateLanderSnapshot(a: LanderSnapshot, b: LanderSnapshot, t: number): LanderSnapshot {
+    return {
+      x: this.lerp(a.x, b.x, t),
+      y: this.lerp(a.y, b.y, t),
+      vx: this.lerp(a.vx, b.vx, t),
+      vy: this.lerp(a.vy, b.vy, t),
+      angle: this.normalizeAngle(a.angle + this.normalizeAngle(b.angle - a.angle) * t),
+      angularVelocity: this.lerp(a.angularVelocity, b.angularVelocity, t),
+      fuel: b.fuel,
+      hp: b.hp,
+    };
+  }
+
+  private checkSurfaceContact(dt: number) {
+    const contacts = this.contactPoints(this.lander).filter((contact) => contact.penetration > 0);
+    if (contacts.length === 0) return;
+    const footContacts = contacts.filter((contact) => contact.label !== 'hull');
+    const hullContact = contacts.find((contact) => contact.label === 'hull');
 
     const stats = LANDERS[this.selectedLander];
-    const contactCount = Math.max(1, footContacts.length);
-    let maxPenetration = Math.max(0, hullPenetration);
+    const contactCount = Math.max(1, contacts.length);
+    let maxPenetration = 0;
     let maxImpactSpeed = 0;
-    let hardContact = hullPenetration > 5;
+    let hardContact = !!hullContact && hullContact.penetration > 3;
+    let deepestContact = contacts[0];
 
-    for (const contact of footContacts) {
+    for (const contact of contacts) {
       maxPenetration = Math.max(maxPenetration, contact.penetration);
-      const radius = { x: contact.foot.x - this.lander.x, y: contact.foot.y - this.lander.y };
-      const footVelocity = {
-        x: this.lander.vx - this.lander.angularVelocity * radius.y,
-        y: this.lander.vy + this.lander.angularVelocity * radius.x,
-      };
-      const radialVelocity = footVelocity.x * contact.normal.x + footVelocity.y * contact.normal.y;
-      const tangentVelocity = footVelocity.x * contact.tangent.x + footVelocity.y * contact.tangent.y;
-      maxImpactSpeed = Math.max(maxImpactSpeed, Math.max(0, -radialVelocity));
+      if (contact.penetration >= deepestContact.penetration) deepestContact = contact;
+      maxImpactSpeed = Math.max(maxImpactSpeed, Math.max(0, -contact.radialVelocity));
 
-      const springAccel = Math.min(260, Math.max(0, contact.penetration * LEG_SPRING - radialVelocity * LEG_DAMPING)) / contactCount;
-      const frictionAccel = -tangentVelocity * LEG_FRICTION / contactCount;
+      const contactStrength = contact.label === 'hull' ? 0.55 : 1;
+      const springAccel = Math.min(420, Math.max(0, contact.penetration * LEG_SPRING - contact.radialVelocity * LEG_DAMPING)) * contactStrength / contactCount;
+      const frictionAccel = -contact.tangentVelocity * LEG_FRICTION * contactStrength / contactCount;
       const fx = contact.normal.x * springAccel + contact.tangent.x * frictionAccel;
       const fy = contact.normal.y * springAccel + contact.tangent.y * frictionAccel;
       this.lander.vx += fx * dt;
       this.lander.vy += fy * dt;
-      this.lander.angularVelocity += (radius.x * fy - radius.y * fx) * LEG_TORQUE_RESPONSE * dt;
-      this.lander.angularVelocity -= this.normalizeAngle(this.localUpAngleAt(this.angleOf(this.lander)) - this.lander.angle) * -0.45 * dt / contactCount;
+      if (contact.label !== 'hull') {
+        const radius = { x: contact.point.x - this.lander.x, y: contact.point.y - this.lander.y };
+        this.lander.angularVelocity += (radius.x * fy - radius.y * fx) * LEG_TORQUE_RESPONSE * dt;
+      }
     }
 
     if (maxPenetration > 0) {
-      const n = this.normalAtPoint(this.lander);
-      this.lander.x += n.x * maxPenetration * 0.82;
-      this.lander.y += n.y * maxPenetration * 0.82;
+      const n = deepestContact.normal;
+      this.lander.x += n.x * (maxPenetration + GROUND_CLEARANCE_BUFFER);
+      this.lander.y += n.y * (maxPenetration + GROUND_CLEARANCE_BUFFER);
       const radialVelocity = this.lander.vx * n.x + this.lander.vy * n.y;
-      if (footContacts.length > 0 && radialVelocity < 0) {
+      if (radialVelocity < 0) {
         this.lander.vx -= n.x * radialVelocity * (1 - LEG_RESTITUTION);
         this.lander.vy -= n.y * radialVelocity * (1 - LEG_RESTITUTION);
       }
     }
 
-    const pad = this.padAtPoint(this.lander);
+    const pad = this.padAtPoint(deepestContact.point) ?? this.padAtPoint(this.lander);
     const horizontalSpeed = Math.abs(this.toMetersPerSecond(this.tangentialVelocity(this.lander)));
     const impactSpeed = this.toMetersPerSecond(maxImpactSpeed);
     const tilt = Math.abs(this.normalizeAngle(this.lander.angle - this.localUpAngleAt(this.angleOf(this.lander))));
     const bothFeetSupported = footContacts.length === LEG_POINTS.length;
-    const soft = bothFeetSupported && impactSpeed < 5.2 && horizontalSpeed < 3.8 && tilt < 0.34;
+    const soft = bothFeetSupported && !hullContact && impactSpeed < 5.8 && horizontalSpeed < 4.2 && tilt < 0.38;
+    this.lastImpactReport = `${impactSpeed.toFixed(1)}m/s V ${horizontalSpeed.toFixed(1)}m/s H`;
 
-    if (impactSpeed > 6.2 || horizontalSpeed > 5.0 || tilt > 0.55 || hardContact) {
+    if (impactSpeed > 7.4 || horizontalSpeed > 6.2 || tilt > 0.66 || hardContact) {
       const massFactor = Math.sqrt(stats.mass / 1000);
-      const damage = (Math.max(0, impactSpeed - 4.6) * 10 + Math.max(0, horizontalSpeed - 3.4) * 6 + Math.max(0, tilt - 0.36) * 34 + (hardContact ? 35 : 0)) * massFactor;
+      const damage = (Math.max(0, impactSpeed - 5.4) * 8 + Math.max(0, horizontalSpeed - 4.2) * 5 + Math.max(0, tilt - 0.42) * 30 + (hardContact ? 24 : 0)) * massFactor;
       this.lander.hp = Math.max(0, this.lander.hp - damage);
-      hardContact = hardContact || this.lander.hp <= 0;
+      if (pad) pad.damaged = true;
+      hardContact = (hardContact && damage > 28) || this.lander.hp <= 0;
       const impact = this.surfacePoint(this.angleOf(this.lander));
       this.spawnImpactFx(impact.x, impact.y, '#ffcf5a', Math.min(18, 4 + Math.round(damage / 8)));
       if (performance.now() - this.lastWarningAt > 260) {
@@ -909,13 +1021,14 @@ export class Game {
 
     if (pad && soft && this.lander.hp > 0) {
       this.landed = true;
+      this.objectivePhase = this.objectivePhase === 'land' ? 'orbit' : this.objectivePhase;
       this.streak++;
       this.lander.vx = 0;
       this.lander.vy = 0;
       this.lander.angle = 0;
       this.lander.angle = this.localUpAngleAt(this.angleOf(this.lander));
       this.lander.angularVelocity = 0;
-      const precision = this.surfaceDistance(this.angleOf(this.lander), this.angleOf(pad));
+      const precision = this.surfaceDistance(this.angleOf(this.lander), pad.angle);
       const precisionM = this.toMeters(precision);
       const earned = Math.round(180 + (1 - precision / pad.radius) * 180 + (1 - impactSpeed / 5.2) * 120 + this.lander.fuel * 2 + this.streak * 25);
       this.score += Math.max(80, earned);
@@ -933,7 +1046,7 @@ export class Game {
       const impact = this.surfacePoint(this.angleOf(this.lander));
       this.spawnImpactFx(impact.x, impact.y, '#ff716a');
       this.playBurst(64, 0.45, 'sawtooth', 0.24);
-      this.showDeathScreen(pad ? 'Landing gear collapsed' : 'Crashed into terrain');
+      this.showDeathScreen(pad ? 'Landing gear collapsed' : hullContact ? 'Hull strike' : 'Crashed into terrain');
     }
   }
 
@@ -991,6 +1104,7 @@ export class Game {
   private updateProjectiles(dt: number) {
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
+      const previous = { x: p.x, y: p.y };
       const n = this.normalAtPoint(p);
       p.vx -= n.x * this.gravity() * dt;
       p.vy -= n.y * this.gravity() * dt;
@@ -1004,12 +1118,33 @@ export class Game {
         this.projectiles.splice(i, 1);
         continue;
       }
-      if (p.life <= 0 || this.surfacePenetration(p) >= 0) {
-        const impact = this.surfacePoint(this.angleOf(p));
+      const impactPoint = this.projectileTerrainImpact(previous, p);
+      if (p.life <= 0 || impactPoint) {
+        const impact = impactPoint ?? this.surfacePoint(this.angleOf(p));
         this.spawnImpactFx(impact.x, impact.y, '#ffcf5a', 8);
         this.projectiles.splice(i, 1);
       }
     }
+  }
+
+  private projectileTerrainImpact(previous: Vec2, projectile: Vec2) {
+    if (this.surfacePenetration(projectile) < 0) return null;
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 8; i++) {
+      const mid = (lo + hi) * 0.5;
+      const sample = {
+        x: this.lerp(previous.x, projectile.x, mid),
+        y: this.lerp(previous.y, projectile.y, mid),
+      };
+      if (this.surfacePenetration(sample) < 0) lo = mid;
+      else hi = mid;
+    }
+    const hit = {
+      x: this.lerp(previous.x, projectile.x, hi),
+      y: this.lerp(previous.y, projectile.y, hi),
+    };
+    return this.surfacePoint(this.angleOf(hit), 2);
   }
 
   private projectileHitsLander(projectile: Projectile) {
@@ -1069,6 +1204,21 @@ export class Game {
     }
   }
 
+  private updateObjectivePhase() {
+    if (this.destroyed || this.landed) return;
+    if (this.objectivePhase !== 'orbit') return;
+    const altitude = this.groundClearance();
+    const speed = Math.hypot(this.lander.vx, this.lander.vy);
+    const orbitalSpeed = Math.sqrt(this.gravity() * Math.max(1, Math.hypot(this.lander.x, this.lander.y)));
+    const radial = Math.abs(this.radialVelocity(this.lander));
+    if (altitude > 900 && radial < 5 && Math.abs(speed - orbitalSpeed) / orbitalSpeed < 0.22) {
+      this.objectivePhase = 'return';
+      this.score += 250;
+      this.spawnImpactFx(this.lander.x, this.lander.y, '#84ffd3', 14);
+      this.playLandingTone();
+    }
+  }
+
   private updateCamera(dt: number) {
     const pad = this.targetPad();
     const altitude = this.groundClearance();
@@ -1081,9 +1231,11 @@ export class Game {
     };
     const nearSurface = 1 - Math.max(0, Math.min(1, altitude / 520));
     const targetBlend = nearSurface * Math.max(0, Math.min(0.22, 1 - distanceToPad / 900));
+    const landingFocus = Math.max(0, Math.min(1, 1 - altitude / 280));
     const surfaceLift = 70 * nearSurface;
-    this.cameraTarget.x = this.lerp(this.lander.x + lookAhead.x + normal.x * surfaceLift, pad.x, targetBlend);
-    this.cameraTarget.y = this.lerp(this.lander.y + lookAhead.y + normal.y * surfaceLift, pad.y, targetBlend);
+    const velocityBias = Math.max(0.25, 1 - landingFocus * 0.68);
+    this.cameraTarget.x = this.lerp(this.lander.x + lookAhead.x * velocityBias + normal.x * surfaceLift, pad.x, targetBlend);
+    this.cameraTarget.y = this.lerp(this.lander.y + lookAhead.y * velocityBias + normal.y * surfaceLift, pad.y, targetBlend);
 
     const desiredSpan = this.input.state.mapView
       ? this.bodyRadiusUnits() * 2.35
@@ -1091,9 +1243,11 @@ export class Game {
     const autoZoom = Math.min(this.width, this.height) / desiredSpan;
     this.cameraTarget.zoom = Math.max(0.18, Math.min(1.55, autoZoom));
     this.cameraTarget.zoom *= 1 - Math.max(0, Math.min(0.25, this.input.state.cameraZoom * 0.02));
-    this.cameraTarget.rotation = this.input.state.mapView ? 0 : Math.PI / 2 - this.angleOf(this.lander);
+    const localRotation = this.normalizeAngle(Math.PI / 2 - this.angleOf(this.lander));
+    const rotationBlend = Math.max(0, Math.min(1, 1 - (altitude - 900) / 1500));
+    this.cameraTarget.rotation = this.input.state.mapView ? 0 : this.normalizeAngle(localRotation * rotationBlend);
 
-    const t = 1 - Math.pow(0.0008, dt);
+    const t = 1 - Math.pow(0.00035, dt);
     this.camera.x = this.lerp(this.camera.x, this.cameraTarget.x, t);
     this.camera.y = this.lerp(this.camera.y, this.cameraTarget.y, t);
     this.camera.zoom = this.lerp(this.camera.zoom, this.cameraTarget.zoom, t);
@@ -1110,12 +1264,14 @@ export class Game {
     this.drawTrajectory(ctx);
     this.drawTerrain(ctx);
     this.drawPads(ctx);
+    this.drawLandingPredictor(ctx);
     this.drawPortals(ctx);
     this.drawProjectiles(ctx);
     this.drawParticles(ctx);
     this.drawRemotePlayers(ctx);
     this.drawLander(ctx);
     if (this.input.state.mapView) this.drawOrbitalMap(ctx);
+    if (this.debugOverlay) this.drawDebugOverlay(ctx);
   }
 
   private drawSky(ctx: CanvasRenderingContext2D) {
@@ -1176,11 +1332,14 @@ export class Game {
 
   private drawTerrain(ctx: CanvasRenderingContext2D) {
     const body = this.currentBody();
-    const samples = 240;
+    const samples = this.terrainSamples.length > 0 ? this.terrainSamples.length : 240;
     ctx.beginPath();
-    for (let i = 0; i <= samples; i++) {
-      const angle = (i / samples) * Math.PI * 2;
-      const point = this.surfacePoint(angle);
+    for (let i = 0; i <= samples; i += 4) {
+      const sample = this.terrainSamples[i % this.terrainSamples.length];
+      const angle = sample?.angle ?? (i / samples) * Math.PI * 2;
+      const radius = sample?.radius ?? this.terrainRadiusAtAngle(angle);
+      const normal = this.normalAtAngle(angle);
+      const point = { x: normal.x * radius, y: normal.y * radius };
       const screen = this.worldToScreen(point);
       if (i === 0) ctx.moveTo(screen.x, screen.y);
       else ctx.lineTo(screen.x, screen.y);
@@ -1264,14 +1423,13 @@ export class Game {
   private drawPads(ctx: CanvasRenderingContext2D) {
     for (const pad of this.pads) {
       const isTarget = pad === this.targetPad();
-      const angle = this.angleOf(pad);
+      const angle = pad.angle;
       const normal = this.normalAtAngle(angle);
       const halfAngle = pad.radius / this.bodyRadiusUnits();
       const start = this.worldToScreen(this.surfacePoint(angle - halfAngle, 9));
       const end = this.worldToScreen(this.surfacePoint(angle + halfAngle, 9));
-      const p = this.worldToScreen(this.surfacePoint(angle, 12));
 
-      ctx.strokeStyle = isTarget ? 'rgba(255,207,90,0.24)' : 'rgba(132,255,211,0.14)';
+      ctx.strokeStyle = pad.damaged ? 'rgba(255,113,106,0.28)' : isTarget ? 'rgba(255,207,90,0.24)' : 'rgba(132,255,211,0.14)';
       ctx.lineWidth = Math.max(14, 24 * this.camera.zoom);
       ctx.lineCap = 'round';
       ctx.beginPath();
@@ -1279,13 +1437,28 @@ export class Game {
       ctx.lineTo(end.x, end.y);
       ctx.stroke();
 
-      ctx.strokeStyle = isTarget ? '#ffcf5a' : '#84ffd3';
+      ctx.strokeStyle = pad.damaged ? '#ff716a' : isTarget ? '#ffcf5a' : '#84ffd3';
       ctx.lineWidth = Math.max(4, 8 * this.camera.zoom);
       ctx.beginPath();
       ctx.moveTo(start.x, start.y);
       ctx.lineTo(end.x, end.y);
       ctx.stroke();
       ctx.lineCap = 'butt';
+
+      const deckLeft = this.worldToScreen({
+        x: pad.x + normal.y * pad.radius,
+        y: pad.y - normal.x * pad.radius,
+      });
+      const deckRight = this.worldToScreen({
+        x: pad.x - normal.y * pad.radius,
+        y: pad.y + normal.x * pad.radius,
+      });
+      ctx.strokeStyle = 'rgba(4,8,10,0.62)';
+      ctx.lineWidth = Math.max(2, 3 * this.camera.zoom);
+      ctx.beginPath();
+      ctx.moveTo(deckLeft.x, deckLeft.y);
+      ctx.lineTo(deckRight.x, deckRight.y);
+      ctx.stroke();
 
       ctx.fillStyle = isTarget ? '#fff4c4' : '#dffdf4';
       ctx.font = `${isTarget ? 12 : 11}px ui-monospace, monospace`;
@@ -1339,7 +1512,9 @@ export class Game {
     const points = this.predictTrajectory();
     if (points.length < 2) return;
     ctx.save();
-    ctx.strokeStyle = 'rgba(255,207,90,0.65)';
+    const impact = points[points.length - 1];
+    const impactSoon = this.surfacePenetration(impact) >= -GROUND_CLEARANCE_BUFFER;
+    ctx.strokeStyle = impactSoon ? this.landingSafetyColor().line : 'rgba(255,207,90,0.65)';
     ctx.setLineDash([8, 8]);
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -1350,6 +1525,46 @@ export class Game {
     });
     ctx.stroke();
     ctx.restore();
+  }
+
+  private drawLandingPredictor(ctx: CanvasRenderingContext2D) {
+    const points = this.predictTrajectory();
+    if (points.length < 8) return;
+    const impact = points[points.length - 1];
+    if (this.surfacePenetration(impact) < -GROUND_CLEARANCE_BUFFER) return;
+
+    const p = this.worldToScreen(impact);
+    const safety = this.landingSafetyColor();
+    ctx.save();
+    ctx.strokeStyle = safety.line;
+    ctx.fillStyle = safety.fill;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 12, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(p.x - 18, p.y);
+    ctx.lineTo(p.x + 18, p.y);
+    ctx.moveTo(p.x, p.y - 18);
+    ctx.lineTo(p.x, p.y + 18);
+    ctx.stroke();
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(safety.label, p.x, p.y - 22);
+    ctx.restore();
+  }
+
+  private landingSafetyColor() {
+    const vertical = Math.abs(this.toMetersPerSecond(this.radialVelocity(this.lander)));
+    const horizontal = Math.abs(this.toMetersPerSecond(this.tangentialVelocity(this.lander)));
+    const tilt = Math.abs(this.normalizeAngle(this.lander.angle - this.localUpAngleAt(this.angleOf(this.lander))));
+    if (vertical < 5.8 && horizontal < 4.2 && tilt < 0.38) {
+      return { line: 'rgba(132,255,211,0.86)', fill: '#84ffd3', label: 'SAFE' };
+    }
+    if (vertical < 8.2 && horizontal < 6.4 && tilt < 0.62) {
+      return { line: 'rgba(255,207,90,0.86)', fill: '#ffcf5a', label: 'ROUGH' };
+    }
+    return { line: 'rgba(255,113,106,0.9)', fill: '#ff716a', label: 'CRASH' };
   }
 
   private drawLander(ctx: CanvasRenderingContext2D) {
@@ -1374,6 +1589,10 @@ export class Game {
     ctx.translate(p.x, p.y);
     ctx.rotate(this.lander.angle + this.camera.rotation);
     ctx.scale(scale, scale);
+    const leftCompression = Math.max(0, Math.min(12, this.surfacePenetration(this.bodyPointToWorld(LEG_POINTS[0])) + 4));
+    const rightCompression = Math.max(0, Math.min(12, this.surfacePenetration(this.bodyPointToWorld(LEG_POINTS[1])) + 4));
+    const leftFootY = 30 - leftCompression;
+    const rightFootY = 30 - rightCompression;
 
     const throttle = this.input.state.throttle;
     if (throttle > 0.02 && this.lander.fuel > 0 && !this.destroyed && !this.landed) {
@@ -1394,22 +1613,22 @@ export class Game {
     ctx.lineWidth = 7;
     ctx.beginPath();
     ctx.moveTo(-16, 13);
-    ctx.lineTo(-28, 30);
+    ctx.lineTo(-28, leftFootY);
     ctx.moveTo(16, 13);
-    ctx.lineTo(28, 30);
+    ctx.lineTo(28, rightFootY);
     ctx.stroke();
 
     ctx.strokeStyle = '#aeb5b7';
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(-16, 13);
-    ctx.lineTo(-28, 30);
+    ctx.lineTo(-28, leftFootY);
     ctx.moveTo(16, 13);
-    ctx.lineTo(28, 30);
-    ctx.moveTo(-28, 30);
-    ctx.lineTo(-38, 30);
-    ctx.moveTo(28, 30);
-    ctx.lineTo(38, 30);
+    ctx.lineTo(28, rightFootY);
+    ctx.moveTo(-28, leftFootY);
+    ctx.lineTo(-38, leftFootY);
+    ctx.moveTo(28, rightFootY);
+    ctx.lineTo(38, rightFootY);
     ctx.stroke();
 
     const hull = ctx.createLinearGradient(-18, -28, 18, 24);
@@ -1554,6 +1773,18 @@ export class Game {
       ctx.fill();
     }
 
+    for (const portal of this.portals) {
+      const p = toMap(portal);
+      ctx.strokeStyle = portal.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, portal.id === 'return' ? 6 : 7, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = portal.color;
+      ctx.font = '10px ui-monospace, monospace';
+      ctx.fillText(portal.id === 'return' ? 'RETURN' : 'PORTAL', p.x + 9, p.y - 7);
+    }
+
     const lp = toMap(this.lander);
     ctx.save();
     ctx.translate(lp.x, lp.y);
@@ -1585,8 +1816,9 @@ export class Game {
     const fuelPct = Math.max(0, Math.min(1, this.lander.fuel / stats.fuel));
     const hpPct = Math.max(0, Math.min(1, this.lander.hp / stats.hp));
     const target = this.targetPad();
-    const distance = this.toMeters(this.surfaceDistance(this.angleOf(this.lander), this.angleOf(target)));
+    const distance = this.toMeters(this.surfaceDistance(this.angleOf(this.lander), target.angle));
     const localTwr = (stats.maxTwr * MOON_GRAVITY_MPS2 / body.gravityMps2).toFixed(2);
+    const objective = this.currentObjectiveText(localTwr);
 
     this.hudElements['score'].textContent = `${this.score}`;
     this.hudElements['rank'].textContent = body.name;
@@ -1605,8 +1837,8 @@ export class Game {
     this.hudElements['rcs-indicator'].textContent = this.input.state.rcsMode ? 'RCS ON' : 'RCS OFF';
     this.hudElements['rcs-indicator'].classList.toggle('active', this.input.state.rcsMode);
     this.hudElements['target-info'].textContent = `${target.name} ${distance.toFixed(0)}m | ${body.gravityMps2.toFixed(2)} m/s2`;
-    this.hudElements['objective-title'].textContent = `LAND ${target.name.toUpperCase()}`;
-    this.hudElements['objective-detail'].textContent = `${body.name} ${body.type} | radius ${Math.round(body.gameRadiusM / 1000)}km game / ${Math.round(body.radiusM / 1000)}km real | ${stats.name} TWR ${localTwr}`;
+    this.hudElements['objective-title'].textContent = objective.title;
+    this.hudElements['objective-detail'].textContent = objective.detail;
     this.hudElements['perf-fps'].textContent = `${this.currentFps}`;
     this.hudElements['perf-entities'].textContent = `${1 + this.remotePlayers.size + this.projectiles.length + this.particles.length}`;
     this.hudElements['perf-draw'].textContent = this.multiplayerSocket?.readyState === WebSocket.OPEN ? '2D NET' : '2D';
@@ -1679,6 +1911,25 @@ export class Game {
       }
     }
 
+    for (const portal of this.portals) {
+      const p = toMap(portal);
+      ctx.strokeStyle = portal.color;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, portal.id === 'return' ? 4 : 5, 0, Math.PI * 2);
+      ctx.stroke();
+      if (portal.id !== 'return') {
+        ctx.fillStyle = portal.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = portal.color;
+      ctx.font = '8px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(portal.id === 'return' ? 'R' : 'VJ', p.x, p.y - 7);
+    }
+
     const lp = toMap(this.lander);
     ctx.save();
     ctx.translate(lp.x, lp.y);
@@ -1699,6 +1950,30 @@ export class Game {
     ctx.fillStyle = '#ffcf5a';
     ctx.textAlign = 'right';
     ctx.fillText(target.name, w - 7, 12);
+  }
+
+  private currentObjectiveText(localTwr: string) {
+    const target = this.targetPad();
+    const body = this.currentBody();
+    const impact = this.landingSafetyColor().label;
+    if (this.objectivePhase === 'orbit') {
+      const orbital = Math.sqrt(this.gravity() * Math.max(1, Math.hypot(this.lander.x, this.lander.y)));
+      const speed = Math.hypot(this.lander.vx, this.lander.vy);
+      return {
+        title: `ORBIT ${body.name.toUpperCase()}`,
+        detail: `hold ${this.toMetersPerSecond(orbital).toFixed(0)}m/s | now ${this.toMetersPerSecond(speed).toFixed(0)}m/s | M map`,
+      };
+    }
+    if (this.objectivePhase === 'return') {
+      return {
+        title: 'FIND PORTAL',
+        detail: 'three Vibe Jam portals are marked on the minimap',
+      };
+    }
+    return {
+      title: `LAND ${target.name.toUpperCase()}`,
+      detail: `${impact} | ${body.name} ${body.type} | ${LANDERS[this.selectedLander].name} TWR ${localTwr} | F3 debug`,
+    };
   }
 
   private drawNavball() {
@@ -1782,6 +2057,59 @@ export class Game {
     else ctx.stroke();
   }
 
+  private drawDebugOverlay(ctx: CanvasRenderingContext2D) {
+    const contacts = this.contactPoints(this.lander);
+    const velocityEnd = {
+      x: this.lander.x + this.lander.vx * 8,
+      y: this.lander.y + this.lander.vy * 8,
+    };
+    const thrust = this.thrustDirection();
+    const thrustEnd = {
+      x: this.lander.x + thrust.x * 180,
+      y: this.lander.y + thrust.y * 180,
+    };
+    const retroEnd = {
+      x: this.lander.x - this.lander.vx * 8,
+      y: this.lander.y - this.lander.vy * 8,
+    };
+
+    ctx.save();
+    this.drawDebugVector(ctx, this.lander, velocityEnd, '#ffcf5a');
+    this.drawDebugVector(ctx, this.lander, thrustEnd, '#84ffd3');
+    this.drawDebugVector(ctx, this.lander, retroEnd, '#ff716a');
+    for (const contact of contacts) {
+      const p = this.worldToScreen(contact.point);
+      ctx.fillStyle = contact.penetration > 0 ? '#ff716a' : '#84ffd3';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, contact.penetration > 0 ? 6 : 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(2,8,12,0.78)';
+    ctx.fillRect(14, this.height - 108, 310, 92);
+    ctx.fillStyle = '#dffdf4';
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    const lines = [
+      `F3 DEBUG  clearance ${this.toMeters(this.minGroundClearance(this.lander)).toFixed(1)}m`,
+      `impact ${this.lastImpactReport}`,
+      `velocity ${this.toMetersPerSecond(Math.hypot(this.lander.vx, this.lander.vy)).toFixed(1)}m/s`,
+      `penetration ${Math.max(0, ...contacts.map((c) => c.penetration)).toFixed(2)}u`,
+    ];
+    lines.forEach((line, index) => ctx.fillText(line, 24, this.height - 84 + index * 18));
+    ctx.restore();
+  }
+
+  private drawDebugVector(ctx: CanvasRenderingContext2D, from: Vec2, to: Vec2, color: string) {
+    const a = this.worldToScreen(from);
+    const b = this.worldToScreen(to);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+
   private showDeathScreen(cause: string) {
     const deathScreen = document.getElementById('death-screen')!;
     document.getElementById('death-info')!.textContent = cause;
@@ -1799,8 +2127,30 @@ export class Game {
     screen.classList.add('visible');
     document.getElementById('continue-btn')!.onclick = () => {
       screen.classList.remove('visible');
-      this.spawnPlayer();
+      this.startOrbitChallenge();
     };
+  }
+
+  private startOrbitChallenge() {
+    const pad = this.targetPad();
+    const stats = LANDERS[this.selectedLander];
+    const normal = this.normalAtAngle(pad.angle);
+    const tangent = { x: -normal.y, y: normal.x };
+    const radius = pad.platformRadius + 160;
+    this.landed = false;
+    this.destroyed = false;
+    this.objectivePhase = 'orbit';
+    this.targetPadIndex = (this.targetPadIndex + 1) % this.pads.length;
+    this.lander.x = normal.x * radius;
+    this.lander.y = normal.y * radius;
+    this.lander.vx = tangent.x * 16;
+    this.lander.vy = tangent.y * 16;
+    this.lander.angle = this.localUpAngleAt(pad.angle);
+    this.lander.angularVelocity = 0;
+    this.lander.fuel = Math.max(this.lander.fuel, stats.fuel * 0.72);
+    this.input.state.throttle = 0;
+    this.camera.x = this.lander.x;
+    this.camera.y = this.lander.y;
   }
 
   private handleTargetCycle() {
@@ -1827,20 +2177,48 @@ export class Game {
     return points;
   }
 
-  private terrainRadiusAtAngle(angle: number) {
+  private rebuildTerrainCache() {
+    this.terrainSamples = [];
+    for (let i = 0; i < TERRAIN_SAMPLE_COUNT; i++) {
+      const angle = (i / TERRAIN_SAMPLE_COUNT) * Math.PI * 2;
+      this.terrainSamples.push({ angle, radius: this.rawTerrainRadiusAtAngle(angle) });
+    }
+  }
+
+  private padPlatformRadius(angle: number, radius: number) {
+    const halfAngle = radius / this.bodyRadiusUnits();
+    let maxRadius = this.baseTerrainRadiusAtAngle(angle);
+    const samples = 18;
+    for (let i = 0; i <= samples; i++) {
+      const t = i / samples;
+      const sampleAngle = angle - halfAngle + t * halfAngle * 2;
+      maxRadius = Math.max(maxRadius, this.baseTerrainRadiusAtAngle(sampleAngle));
+    }
+    return maxRadius + 14;
+  }
+
+  private rawTerrainRadiusAtAngle(angle: number) {
     const base = this.baseTerrainRadiusAtAngle(angle);
     for (const pad of this.pads) {
-      const padAngle = this.angleOf(pad);
-      const distance = this.surfaceDistance(angle, padAngle);
-      const padRadius = Math.hypot(pad.x, pad.y);
-      if (distance <= pad.radius) return padRadius;
-      if (distance <= pad.radius * 1.45) {
-        const t = (distance - pad.radius) / (pad.radius * 0.45);
+      const distance = this.surfaceDistance(angle, pad.angle);
+      if (distance <= pad.radius) return pad.platformRadius;
+      if (distance <= pad.radius * 1.7) {
+        const t = (distance - pad.radius) / (pad.radius * 0.7);
         const smooth = t * t * (3 - 2 * t);
-        return this.lerp(padRadius, base, smooth);
+        return this.lerp(pad.platformRadius, base, smooth);
       }
     }
     return base;
+  }
+
+  private terrainRadiusAtAngle(angle: number) {
+    if (this.terrainSamples.length === 0) return this.rawTerrainRadiusAtAngle(angle);
+    const normalized = this.positiveAngle(angle);
+    const samplePosition = normalized / (Math.PI * 2) * TERRAIN_SAMPLE_COUNT;
+    const index = Math.floor(samplePosition) % TERRAIN_SAMPLE_COUNT;
+    const nextIndex = (index + 1) % TERRAIN_SAMPLE_COUNT;
+    const t = samplePosition - Math.floor(samplePosition);
+    return this.lerp(this.terrainSamples[index].radius, this.terrainSamples[nextIndex].radius, t);
   }
 
   private baseTerrainRadiusAtAngle(angle: number) {
@@ -1855,7 +2233,7 @@ export class Game {
 
   private padAtPoint(point: Vec2) {
     const angle = this.angleOf(point);
-    return this.pads.find((pad) => this.surfaceDistance(angle, this.angleOf(pad)) <= pad.radius);
+    return this.pads.find((pad) => this.surfaceDistance(angle, pad.angle) <= pad.radius);
   }
 
   private targetPad() {
@@ -1951,26 +2329,62 @@ export class Game {
   }
 
   private groundClearance() {
-    const footClearance = this.legFootPoints()
-      .map((foot) => -this.surfacePenetration(foot));
-    const hull = this.bodyPointToWorld({ x: 0, y: HULL_BOTTOM });
-    footClearance.push(-this.surfacePenetration(hull));
-    return Math.max(0, Math.min(...footClearance));
+    return Math.max(0, this.minGroundClearance(this.lander));
   }
 
-  private bodyPointToWorld(point: Vec2) {
-    const sin = Math.sin(this.lander.angle);
-    const cos = Math.cos(this.lander.angle);
+  private minGroundClearance(snapshot: LanderSnapshot) {
+    const points = [
+      ...LEG_POINTS,
+      { x: 0, y: HULL_BOTTOM },
+    ].map((point) => this.bodyPointToWorld(point, snapshot));
+    return Math.min(...points.map((point) => -this.surfacePenetration(point)));
+  }
+
+  private contactPoints(snapshot: LanderSnapshot): ContactPoint[] {
+    const bodyPoints: Array<{ label: ContactPoint['label']; bodyPoint: Vec2 }> = [
+      { label: 'left-leg', bodyPoint: LEG_POINTS[0] },
+      { label: 'right-leg', bodyPoint: LEG_POINTS[1] },
+      { label: 'hull', bodyPoint: { x: 0, y: HULL_BOTTOM } },
+    ];
+
+    return bodyPoints.map(({ label, bodyPoint }) => {
+      const point = this.bodyPointToWorld(bodyPoint, snapshot);
+      const normal = this.normalAtAngle(this.angleOf(point));
+      const tangent = { x: -normal.y, y: normal.x };
+      const radius = { x: point.x - snapshot.x, y: point.y - snapshot.y };
+      const footVelocity = {
+        x: snapshot.vx - snapshot.angularVelocity * radius.y,
+        y: snapshot.vy + snapshot.angularVelocity * radius.x,
+      };
+      const radialVelocity = footVelocity.x * normal.x + footVelocity.y * normal.y;
+      const tangentVelocity = footVelocity.x * tangent.x + footVelocity.y * tangent.y;
+      return {
+        label,
+        point,
+        bodyPoint,
+        penetration: this.surfacePenetration(point),
+        normal,
+        tangent,
+        footVelocity,
+        radialVelocity,
+        tangentVelocity,
+      };
+    });
+  }
+
+  private bodyPointToWorld(point: Vec2, snapshot: LanderSnapshot = this.lander) {
+    const sin = Math.sin(snapshot.angle);
+    const cos = Math.cos(snapshot.angle);
     const screenX = point.x * cos - point.y * sin;
     const screenY = point.x * sin + point.y * cos;
     return {
-      x: this.lander.x + screenX,
-      y: this.lander.y - screenY,
+      x: snapshot.x + screenX,
+      y: snapshot.y - screenY,
     };
   }
 
-  private legFootPoints() {
-    return LEG_POINTS.map((point) => this.bodyPointToWorld(point));
+  private legFootPoints(snapshot: LanderSnapshot = this.lander) {
+    return LEG_POINTS.map((point) => this.bodyPointToWorld(point, snapshot));
   }
 
   private emitExhaust(dt: number, throttle: number) {
@@ -2026,6 +2440,11 @@ export class Game {
     while (angle > Math.PI) angle -= Math.PI * 2;
     while (angle < -Math.PI) angle += Math.PI * 2;
     return angle;
+  }
+
+  private positiveAngle(angle: number) {
+    const full = Math.PI * 2;
+    return ((angle % full) + full) % full;
   }
 
   private lerp(a: number, b: number, t: number) {
